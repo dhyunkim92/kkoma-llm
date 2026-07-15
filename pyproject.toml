@@ -9,8 +9,8 @@ description = "A compact, reproducible decoder-only LLM project: tokenizer, arch
 readme = "README.md"
 # Spec recommends Python 3.11; the code is written to run on 3.10+ as well.
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
-authors = [{ name = "Kkoma-LLM" }]
+license = { text = "MIT" }
+authors = [{ name = "Donghyun Kim" }]
 dependencies = [
     "torch>=2.0",
     "tokenizers>=0.15",
