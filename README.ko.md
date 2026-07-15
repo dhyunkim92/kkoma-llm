@@ -6,6 +6,12 @@
 
 <p align="center"><b><a href="README.md">English</a></b> | 한국어</p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+"/>
+  <img src="https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch 2.0+"/>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
+</p>
+
 > **Kkoma-LLM은 '쓰기 위한' 모델이 아니라 '이해하기 위해' 처음부터 직접 만든 소형 언어 모델입니다.**
 > *꼬마* 는 작고 아직 다 자라지 않았지만 직접 만들고 키워 나가는 존재를 뜻합니다. 이 프로젝트가
 > 바로 그렇습니다. 거대한 상용 모델을 단순히 축소하거나 남의 가중치를 fine-tuning하는 대신, 제한된 자원

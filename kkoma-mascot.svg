@@ -1,6 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480">
-  <!-- soft badge background -->
-  <circle cx="240" cy="240" r="224" fill="#FFF4DD"/>
+  <!-- soft square background -->
+  <rect width="480" height="480" fill="#FFF4DD"/>
+
+  <!-- everything (tagline + chick) nudged up -->
+  <g transform="translate(0,-20)">
 
   <!-- ground shadow -->
   <ellipse cx="240" cy="418" rx="104" ry="15" fill="#F0DFBE" opacity="0.6"/>
@@ -49,4 +52,10 @@
   <!-- rounded duck-ish bill -->
   <path d="M222 295 Q240 288 258 295 Q259 310 240 311 Q221 310 222 295 Z" fill="#F6A73C"/>
   <path d="M229 303 Q240 306 251 303" stroke="#E8912B" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+  <!-- tagline above the chick -->
+  <text x="240" y="88" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="40" font-weight="bold" fill="#78542A">Help me grow!</text>
+
+  </g>
 </svg>

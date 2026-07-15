@@ -6,6 +6,12 @@
 
 <p align="center">English | <b><a href="README.ko.md">한국어</a></b></p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+"/>
+  <img src="https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch 2.0+"/>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
+</p>
+
 > **Kkoma-LLM is a small language model built from scratch to be understood, not just used.**
 > *Kkoma* (꼬마) is the Korean word for a little kid: small and not yet fully grown, but built and
 > raised by hand. That is exactly what this project is. Instead of shrinking a large commercial model
