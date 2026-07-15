@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kkoma-llm"
+version = "0.1.0"
+description = "A compact, reproducible decoder-only LLM project: tokenizer, architecture study, pretraining, and Korean continued pretraining."
+readme = "README.md"
+# Spec recommends Python 3.11; the code is written to run on 3.10+ as well.
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Kkoma-LLM" }]
+dependencies = [
+    "torch>=2.0",
+    "tokenizers>=0.15",
+    "datasets>=2.16",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+logging = ["wandb>=0.16"]
+dev = ["pytest>=7.4"]
+
+[tool.setuptools.packages.find]
+include = ["kkoma*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

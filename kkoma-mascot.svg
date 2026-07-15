@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480">
+  <!-- soft badge background -->
+  <circle cx="240" cy="240" r="224" fill="#FFF4DD"/>
+
+  <!-- ground shadow -->
+  <ellipse cx="240" cy="418" rx="104" ry="15" fill="#F0DFBE" opacity="0.6"/>
+
+  <!-- cute chick feet: chunky forward-facing toes with volume -->
+  <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- shadow/base layer (darker) -->
+    <g stroke="#E8912B" stroke-width="11">
+      <path d="M214 400 L202 412 M214 400 V415 M214 400 L226 412"/>
+      <path d="M266 400 L254 412 M266 400 V415 M266 400 L278 412"/>
+    </g>
+    <!-- top highlight layer (lighter, shifted up for volume) -->
+    <g stroke="#FBB84D" stroke-width="5">
+      <path d="M214 399 L202.5 410 M214 399 V413 M214 399 L225.5 410"/>
+      <path d="M266 399 L254.5 410 M266 399 V413 M266 399 L277.5 410"/>
+    </g>
+  </g>
+
+  <!-- little wings, spread out to the sides (behind the body) -->
+  <g fill="#F7C13C">
+    <path d="M126 288 Q86 258 66 250 Q52 258 68 272 Q52 282 70 292 Q92 316 126 308 Q120 298 126 288 Z"/>
+    <path d="M354 288 Q394 258 414 250 Q428 258 412 272 Q428 282 410 292 Q388 316 354 308 Q360 298 354 288 Z"/>
+  </g>
+
+  <!-- body: one big round blob -->
+  <ellipse cx="240" cy="258" rx="134" ry="140" fill="#FFD24E"/>
+  <ellipse cx="240" cy="290" rx="92" ry="96" fill="#FFDD7A"/>
+
+  <!-- minimal eggshell cap -->
+  <path d="M158 186 L186 150 L214 180 L240 142 L266 180 L294 150 L322 186
+           Q325 112 240 110 Q155 112 158 186 Z"
+        fill="#FFFDF8" stroke="#ECE1CF" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- blush -->
+  <ellipse cx="176" cy="286" rx="17" ry="10" fill="#FFA6B0" opacity="0.6"/>
+  <ellipse cx="304" cy="286" rx="17" ry="10" fill="#FFA6B0" opacity="0.6"/>
+
+  <!-- eyes: big, simple, shiny -->
+  <ellipse cx="207" cy="264" rx="11" ry="14.5" fill="#3A3A3A"/>
+  <ellipse cx="273" cy="264" rx="11" ry="14.5" fill="#3A3A3A"/>
+  <circle cx="203" cy="259" r="4" fill="#FFFFFF"/>
+  <circle cx="269" cy="259" r="4" fill="#FFFFFF"/>
+  <circle cx="211" cy="269" r="1.6" fill="#FFFFFF"/>
+  <circle cx="277" cy="269" r="1.6" fill="#FFFFFF"/>
+
+  <!-- rounded duck-ish bill -->
+  <path d="M222 295 Q240 288 258 295 Q259 310 240 311 Q221 310 222 295 Z" fill="#F6A73C"/>
+  <path d="M229 303 Q240 306 251 303" stroke="#E8912B" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>

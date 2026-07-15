@@ -1,0 +1,65 @@
+"""Generate text from a checkpoint.
+
+    python scripts/sample.py \
+        --checkpoint artifacts/checkpoints/base_125m/final.pt \
+        --config configs/pretraining/base_125m.yaml \
+        --prompt "In the future, small language models" \
+        --max-new-tokens 100 --temperature 0.8 --top-k 50
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import argparse
+
+import torch
+
+from kkoma.config import RunConfig
+from kkoma.generation.generate import GenerationConfig, generate
+from kkoma.model.model import KkomaModel
+from kkoma.training.checkpoint import load_checkpoint
+from scripts._common import build_tokenizer
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Sample from a Kkoma checkpoint")
+    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--prompt", default="The meaning of life is")
+    parser.add_argument("--max-new-tokens", type=int, default=100)
+    parser.add_argument("--temperature", type=float, default=0.8)
+    parser.add_argument("--top-k", type=int, default=50)
+    parser.add_argument("--top-p", type=float, default=1.0)
+    parser.add_argument("--seed", type=int, default=1234)
+    args = parser.parse_args()
+
+    config = RunConfig.from_yaml(args.config)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = KkomaModel(config.model).to(device)
+    load_checkpoint(args.checkpoint, model, map_location=str(device))
+    model.eval()
+
+    tokenizer = build_tokenizer(config)
+    ids = tokenizer.encode(args.prompt, add_bos=True)
+    input_ids = torch.tensor([ids], dtype=torch.long, device=device)
+
+    gen_cfg = GenerationConfig(
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        top_k=args.top_k,
+        top_p=args.top_p,
+        eos_token_id=tokenizer.eos_id,
+        seed=args.seed,
+        use_cache=True,
+    )
+    out = generate(model, input_ids, gen_cfg)[0].tolist()
+    print(tokenizer.decode(out))
+
+
+if __name__ == "__main__":
+    main()

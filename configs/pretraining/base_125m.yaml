@@ -1,0 +1,71 @@
+# Kkoma-125M-Base (spec 13.1 / 15). Modern stack, 2.5B-token budget.
+project:
+  name: kkoma-llm
+  run_name: base-125m-tpp20
+  seed: 42
+  data_seed: 42
+  init_seed: 42
+  sampling_seed: 1234
+
+model:
+  vocab_size: 32768
+  context_length: 1024
+  n_layer: 12
+  d_model: 768
+  n_head: 12
+  n_kv_head: 3
+  head_dim: 64
+  norm: rmsnorm
+  positional_encoding: rope
+  activation: swiglu
+  rope_theta: 10000.0
+  tie_word_embeddings: true
+  bias: false
+  dropout: 0.0
+
+tokenizer:
+  path: artifacts/tokenizer
+
+data:
+  sampling_seed: 42
+  min_doc_chars: 16
+  sources:
+    - { name: fineweb-edu, path: "data/pretrain/train/*.jsonl", weight: 0.95, text_key: text }
+    - { name: fineweb2-korean, path: "data/pretrain/train_ko/*.jsonl", weight: 0.05, text_key: text }
+  val_sources:
+    - { name: en, path: "data/pretrain/val/*.jsonl", weight: 1.0, text_key: text }
+    - { name: ko, path: "data/pretrain/val_ko/*.jsonl", weight: 1.0, text_key: text }
+
+training:
+  precision: fp16
+  global_batch_tokens: 262144
+  micro_batch_size: 4
+  max_tokens: 2500000000
+  grad_clip: 1.0
+  log_interval: 10
+  eval_interval: 1000
+
+optimizer:
+  name: adamw
+  learning_rate: 0.0006
+  beta1: 0.9
+  beta2: 0.95
+  weight_decay: 0.1
+
+scheduler:
+  name: cosine
+  warmup_ratio: 0.02
+  min_lr_ratio: 0.1
+
+distributed:
+  backend: nccl
+
+logging:
+  backend: wandb
+  project: kkoma-llm-pt
+
+checkpoint:
+  dir: artifacts/checkpoints/base-125m
+  save_interval: 1000
+  keep_last: 3
+  save_best: true

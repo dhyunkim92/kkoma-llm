@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# artifacts (data/checkpoints/logs are large and reproducible)
+# root-anchored so kkoma/data/ (source code) is not swept up
+/artifacts/checkpoints/
+/artifacts/logs/
+/artifacts/evaluation/
+/data/
+/wandb/
+*.pt
+*.bin
+
+# tokenizer artifacts stay tracked (not under an ignored path); data manifests
+# live under /data/ and are intentionally ignored along with the corpus
+!artifacts/tokenizer/.gitkeep
+
+.pytest_cache/
+.ipynb_checkpoints/

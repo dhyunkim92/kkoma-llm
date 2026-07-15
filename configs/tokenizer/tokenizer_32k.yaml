@@ -1,0 +1,25 @@
+# Kkoma-Tokenizer-32K (spec section 4). Byte-level BPE, 32,768 vocab incl. 23 special tokens.
+#
+# Consumed by:
+#   scripts/prepare_tokenizer_data.py --config <this file>   (data section)
+#   scripts/train_tokenizer.py --config <this file>          (vocab/min_frequency/output_dir/seed)
+#
+# Special tokens are intentionally NOT configurable here: their identity and
+# order are fixed in kkoma/tokenizer/special_tokens.py because later phases
+# (Chat/Agent) depend on stable token ids.
+vocab_size: 32768
+min_frequency: 2
+output_dir: artifacts/tokenizer
+seed: 42
+# Training mixture (spec 4.2): English FineWeb-Edu 75% + Korean FineWeb2 25%, ~20GB.
+data:
+  english:
+    name: HuggingFaceFW/fineweb-edu
+    subset: default
+    weight: 0.75
+    target_gb: 15
+  korean:
+    name: HuggingFaceFW/fineweb-2
+    subset: kor_Hang
+    weight: 0.25
+    target_gb: 5

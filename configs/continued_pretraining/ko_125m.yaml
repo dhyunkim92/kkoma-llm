@@ -1,0 +1,73 @@
+# Kkoma-125M-Ko-Base (spec 19). Korean continued pretraining from the 125M Base.
+# Run with: scripts/train_continued.py --init-from <base-125m final.pt>
+# v1 default: start from a FRESH optimizer state (do not pass --resume).
+project:
+  name: kkoma-llm
+  run_name: ko-125m-cpt-2b
+  seed: 42
+  data_seed: 42
+  init_seed: 42
+  sampling_seed: 1234
+
+model:
+  vocab_size: 32768
+  context_length: 1024
+  n_layer: 12
+  d_model: 768
+  n_head: 12
+  n_kv_head: 3
+  head_dim: 64
+  norm: rmsnorm
+  positional_encoding: rope
+  activation: swiglu
+  rope_theta: 10000.0
+  tie_word_embeddings: true
+  bias: false
+  dropout: 0.0
+
+tokenizer:
+  path: artifacts/tokenizer
+
+data:
+  sampling_seed: 42
+  min_doc_chars: 16
+  sources:
+    - { name: fineweb2-korean, path: "data/korean/train_ko/*.jsonl", weight: 0.70, text_key: text }
+    - { name: english-replay, path: "data/korean/train_en/*.jsonl", weight: 0.30, text_key: text }
+  val_sources:
+    - { name: en, path: "data/korean/val_en/*.jsonl", weight: 1.0, text_key: text }
+    - { name: ko, path: "data/korean/val_ko/*.jsonl", weight: 1.0, text_key: text }
+
+training:
+  precision: fp16
+  global_batch_tokens: 262144
+  micro_batch_size: 4
+  max_tokens: 2000000000
+  grad_clip: 1.0
+  log_interval: 10
+  eval_interval: 1000
+
+optimizer:
+  name: adamw
+  learning_rate: 0.00005
+  beta1: 0.9
+  beta2: 0.95
+  weight_decay: 0.1
+
+scheduler:
+  name: cosine
+  warmup_ratio: 0.02
+  min_lr_ratio: 0.1
+
+distributed:
+  backend: nccl
+
+logging:
+  backend: wandb
+  project: kkoma-llm-cpt
+
+checkpoint:
+  dir: artifacts/checkpoints/ko-125m-cpt2b
+  save_interval: 1000
+  keep_last: 3
+  save_best: true
