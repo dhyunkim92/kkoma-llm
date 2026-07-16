@@ -341,6 +341,25 @@ python scripts/prepare_pretraining_data.py \
 11.5B 코퍼스를 한 번 만들면 125M은 앞 1.25B, 350M은 앞 3.5B, 800M은 앞 8B, 1B는 앞 9B, 1.3B는
 전체를 사용합니다(실제로 읽는 양은 각 config의 `training.max_tokens`가 결정).
 
+**1′) downstream 벤치마크 세트 준비 (선택)**
+
+학습 중 HellaSwag / ARC-Easy / KoBEST-HellaSwag를 채점하고 싶을 때만 필요합니다(§7 참고). 없어도
+학습은 정상 동작하며 해당 평가만 건너뜁니다.
+
+```bash
+python scripts/prepare_downstream_data.py --output-dir data/downstream
+```
+
+태스크별 500문항을 뽑아 JSONL로 고정한 뒤 원본 다운로드는 삭제합니다. 샘플링은 `--seed`(기본 42)와
+고정된 데이터셋 revision으로 결정되므로, 다시 만들어도 같은 문항이 나오고 모든 모델이 동일한 세트를
+봅니다.
+
+| 태스크 | split | 언어 | 샘플링 |
+|---|---|---|---|
+| HellaSwag | validation | 영어 | 500, 정답 label별 125 stratified |
+| ARC-Easy | test | 영어 | 500, 무작위, 원본 선택지 유지 |
+| KoBEST-HellaSwag | test | 한국어 | 500 전체 |
+
 **2) 학습 (단일 GPU)**
 
 ```bash
@@ -425,6 +444,13 @@ python scripts/train_continued.py \
 **forgetting 측정**: 검증 loaders가 `en`/`ko`로 분리돼 있어 학습 중 영어/한국어 loss가 따로 찍힙니다.
 `val/loss_en`이 학습 전 Base 대비 얼마나 올라가는지로 catastrophic forgetting을 봅니다.
 
+**여기서도 downstream 벤치마크가 동작합니다**(§7). CPT config도 같은 세 태스크를 켜 두는데, 사실
+이 지표가 가장 의미 있는 곳이 여기입니다. Base는 한국어를 5%만 보므로 `downstream/ko_avg`
+(KoBEST-HellaSwag)가 한국어 적응 전까지 거의 chance에 머물다가, CPT를 거치며 올라갑니다. 아직
+안 만들었다면 세트를 먼저 준비하세요(Phase 2 단계 1′). Base에서 이미 돌렸다면 같은
+`data/downstream/` 파일을 그대로 재사용하므로 추가 작업은 없습니다. 파일이 없으면 CPT는 실패하지
+않고 경고 후 건너뜁니다.
+
 ---
 
 ## 7. 평가와 생성
@@ -443,23 +469,9 @@ python scripts/evaluate.py \
 | `--max-batches` | `50` | 검증에 사용할 배치 수 |
 | `--no-generation` | (꺼짐) | 생성 샘플 단계 건너뛰기 |
 
-**학습 중 downstream 벤치마크**: zero-shot 객관식 세 세트를 validation loss와는 별도 주기로
-채점합니다(`downstream_interval`, 기본 1,000스텝 + step 0 baseline). 고정 세트는 한 번만
-준비합니다.
-
-```bash
-python scripts/prepare_downstream_data.py --output-dir data/downstream
-```
-
-태스크별 500문항을 뽑아 JSONL로 고정한 뒤 원본 다운로드는 삭제합니다. 샘플링은 `--seed`(기본 42)와
-고정된 데이터셋 revision으로 결정되므로, 다시 만들어도 같은 문항이 나오고 모든 모델이 동일한 세트를
-봅니다.
-
-| 태스크 | split | 언어 | 샘플링 |
-|---|---|---|---|
-| HellaSwag | validation | 영어 | 500, 정답 label별 125 stratified |
-| ARC-Easy | test | 영어 | 500, 무작위, 원본 선택지 유지 |
-| KoBEST-HellaSwag | test | 한국어 | 500 전체 |
+**학습 중 downstream 벤치마크**: 고정 세트를 준비해 뒀다면(Phase 2 단계 1′, 선택) zero-shot 객관식
+세 세트(HellaSwag, ARC-Easy, KoBEST-HellaSwag)를 validation loss와는 별도 주기로 채점합니다
+(`downstream_interval`, 기본 1,000스텝 + step 0 baseline).
 
 채점은 length-normalized continuation log-likelihood(`acc_norm`)입니다. 태스크마다 `margin_max`,
 `margin_mean`(정답에서 가장 강한 / 평균 오답을 뺀 값)도 기록합니다. chance 근처에서는 accuracy가

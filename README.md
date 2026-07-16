@@ -355,6 +355,25 @@ downloaded. With `--tokens 11.5e9`, Korean is ~0.58B tokens (5%), not all of Fin
 11.5B corpus once: 125M reads the first 1.25B tokens, 350M the first 3.5B, 800M the first 8B, 1B the
 first 9B, and 1.3B all of it (how much is actually read is set by each config's `training.max_tokens`).
 
+**1′) Prepare downstream benchmark sets (optional)**
+
+Only needed if you want HellaSwag / ARC-Easy / KoBEST-HellaSwag scored during training (see §7).
+Training runs fine without it and simply skips them.
+
+```bash
+python scripts/prepare_downstream_data.py --output-dir data/downstream
+```
+
+This samples 500 questions per task and freezes them to JSONL, then deletes the source downloads.
+The sampling is fixed by `--seed` (default 42) and the pinned dataset revisions, so rebuilding
+yields the identical questions and every model sees the same test.
+
+| Task | Split | Language | Sampling |
+|---|---|---|---|
+| HellaSwag | validation | English | 500, stratified 125 per gold label |
+| ARC-Easy | test | English | 500, random, original choice sets kept |
+| KoBEST-HellaSwag | test | Korean | all 500 |
+
 **2) Train (single GPU)**
 
 ```bash
@@ -444,6 +463,12 @@ python scripts/train_continued.py \
 losses are logged separately during training. Catastrophic forgetting is read off how much
 `val/loss_en` rises relative to the pre-adaptation Base.
 
+**Downstream benchmarks apply here too** (§7). The CPT configs enable the same three tasks, and this
+is where they matter most: the Base sees only 5% Korean, so `downstream/ko_avg` (KoBEST-HellaSwag)
+sits near chance until Korean adaptation moves it. Prepare the sets first (Phase 2 step 1′) if you
+have not already; the same `data/downstream/` files are reused, so nothing extra is needed when you
+ran it for the Base. If they are missing, CPT logs a warning and skips them rather than failing.
+
 ---
 
 ## 7. Evaluation and generation
@@ -463,23 +488,10 @@ python scripts/evaluate.py \
 | `--max-batches` | `50` | number of validation batches |
 | `--no-generation` | (off) | skip the generation-sample step |
 
-**Downstream benchmarks during training**: three zero-shot multiple-choice sets are scored on a
-separate cadence (`downstream_interval`, default every 1,000 steps, plus a step-0 baseline),
-alongside the validation-loss curve. Prepare the frozen sets once:
-
-```bash
-python scripts/prepare_downstream_data.py --output-dir data/downstream
-```
-
-This samples 500 questions per task and freezes them to JSONL, then deletes the source downloads.
-The sampling is fixed by `--seed` (default 42) and the pinned dataset revisions, so rebuilding
-yields the identical questions and every model sees the same test.
-
-| Task | Split | Language | Sampling |
-|---|---|---|---|
-| HellaSwag | validation | English | 500, stratified 125 per gold label |
-| ARC-Easy | test | English | 500, random, original choice sets kept |
-| KoBEST-HellaSwag | test | Korean | all 500 |
+**Downstream benchmarks during training**: if you prepared the frozen sets (Phase 2 step 1′,
+optional), three zero-shot multiple-choice sets (HellaSwag, ARC-Easy, KoBEST-HellaSwag) are scored
+on a separate cadence (`downstream_interval`, default every 1,000 steps, plus a step-0 baseline),
+alongside the validation-loss curve.
 
 Scoring is length-normalized continuation log-likelihood (`acc_norm`). Each task also logs a
 `margin_max` and `margin_mean` (gold minus the strongest / average distractor): near chance the
