@@ -1,4 +1,4 @@
-# Kkoma-1.3B-Base (L24 d2048 h32 kv8, ~1130M params). 23B-token budget (tpp ~20).
+# Kkoma-1.3B-Base (L24 d2048 h32 kv8, ~1130M params). 11.5B-token budget (tpp ~10).
 # Measured peak on one V100 32GB (seq 1024, fp16 autocast + AdamW):
 #   micro_bs=1 -> 19.3 GB, micro_bs=2 -> 22.6 GB.
 # micro_bs=2 (grad_accum auto-derives to 16 for the 262,144-token global batch
@@ -6,7 +6,7 @@
 # training without activation checkpointing (~1.5B).
 project:
   name: kkoma-llm
-  run_name: base-1.3b-tpp20
+  run_name: base-1.3b-tpp10
   seed: 42
   data_seed: 42
   init_seed: 42
@@ -53,7 +53,7 @@ training:
   precision: fp16
   global_batch_tokens: 262144
   micro_batch_size: 2
-  max_tokens: 23000000000
+  max_tokens: 11500000000
   grad_clip: 1.0
   log_interval: 10
   eval_interval: 1000

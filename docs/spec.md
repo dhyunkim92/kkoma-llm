@@ -768,7 +768,7 @@ context_length: 1,024
 vocab_size: 32,768
 ```
 
-실제 파라미터는 약 1,130M(임베딩 포함)이다. rank당 실측 peak: `micro_batch_size=2` → 22.6 GB(기본값, grad_accum 16), 1 → 19.3 GB. token budget 23B(tpp ~20), peak LR 1.5e-4. activation checkpointing 없이 V100 32GB에 올릴 수 있는 실질 상한(약 1.5B)에 가깝다.
+실제 파라미터는 약 1,130M(임베딩 포함)이다. rank당 실측 peak: `micro_batch_size=2` → 22.6 GB(기본값, grad_accum 16), 1 → 19.3 GB. token budget 11.5B(tpp ~10), peak LR 1.5e-4. activation checkpointing 없이 V100 32GB에 올릴 수 있는 실질 상한(약 1.5B)에 가깝다.
 
 모든 이름의 `125M`, `350M`, `800M`, `1B`, `1.3B`은 실제 파라미터 수와 충분히 가까워야 한다. 최종 config 생성 시 parameter count report를 저장한다.
 
@@ -787,14 +787,14 @@ Base pretraining은 영어 전용이 아니다. 한국어가 5% 포함되며(0%�
 
 ### 14.2 Master corpus
 
-총 23B-token master corpus를 seed 기반으로 생성한다. corpus는 영어(95%)와 한국어(5%) 두 언어를 모두 포함하며, 언어별 디렉터리(`train/`·`train_ko/`·`val/`·`val_ko/`)로 저장해 학습 시 config weight로 혼합하고 검증 loss를 언어별로 계산한다.
+총 11.5B-token master corpus를 seed 기반으로 생성한다. corpus는 영어(95%)와 한국어(5%) 두 언어를 모두 포함하며, 언어별 디렉터리(`train/`·`train_ko/`·`val/`·`val_ko/`)로 저장해 학습 시 config weight로 혼합하고 검증 loss를 언어별로 계산한다.
 
 ```text
-앞 2.5B tokens → Kkoma-125M
-앞 7B tokens   → Kkoma-350M
-앞 16B tokens  → Kkoma-800M
-앞 18B tokens  → Kkoma-1B
-전체 23B tokens → Kkoma-1.3B
+앞 1.25B tokens → Kkoma-125M
+앞 3.5B tokens  → Kkoma-350M
+앞 8B tokens    → Kkoma-800M
+앞 9B tokens    → Kkoma-1B
+전체 11.5B tokens → Kkoma-1.3B
 ```
 
 corpus 생성 전에 문서 순서를 seed 기반으로 섞고 고정한다.
@@ -839,11 +839,11 @@ Dropout: 0.0
 ### 15.2 Token budget
 
 ```text
-Kkoma-125M: 2.5B tokens
-Kkoma-350M: 7B tokens
-Kkoma-800M: 16B tokens
-Kkoma-1B:   18B tokens
-Kkoma-1.3B: 23B tokens
+Kkoma-125M: 1.25B tokens
+Kkoma-350M: 3.5B tokens
+Kkoma-800M: 8B tokens
+Kkoma-1B:   9B tokens
+Kkoma-1.3B: 11.5B tokens
 ```
 
 ### 15.3 초기 peak learning rate
@@ -1262,11 +1262,11 @@ Run name 예:
 
 ```text
 core-125m-rope-seed42
-base-125m-tpp20
-base-350m-tpp20
-base-800m-tpp20
-base-1b-tpp20
-base-1.3b-tpp20
+base-125m-tpp10
+base-350m-tpp10
+base-800m-tpp10
+base-1b-tpp10
+base-1.3b-tpp10
 ko-125m-cpt-2b
 ko-350m-cpt-2b
 ko-800m-cpt-2b
@@ -1301,7 +1301,7 @@ checkpoint
 ```yaml
 project:
   name: kkoma-llm
-  run_name: base-125m-tpp20
+  run_name: base-125m-tpp10
   seed: 42
 
 model:
@@ -1398,11 +1398,11 @@ Kkoma-1.3B-Ko-Base
 
 ```text
 kkoma-core-125m-rope
-kkoma-base-125m-tpp20
-kkoma-base-350m-tpp20
-kkoma-base-800m-tpp20
-kkoma-base-1b-tpp20
-kkoma-base-1.3b-tpp20
+kkoma-base-125m-tpp10
+kkoma-base-350m-tpp10
+kkoma-base-800m-tpp10
+kkoma-base-1b-tpp10
+kkoma-base-1.3b-tpp10
 kkoma-ko-125m-cpt2b
 kkoma-ko-350m-cpt2b
 kkoma-ko-800m-cpt2b

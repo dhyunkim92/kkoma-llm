@@ -325,11 +325,11 @@ scaling (spec §13–18).
 
 | Model | n_layer | d_model | n_head | n_kv_head | token budget | peak LR | config |
 |---|---|---|---|---|---|---|---|
-| 125M | 12 | 768 | 12 | 3 | 2.5B | 6e-4 | `base_125m.yaml` |
-| 350M | 24 | 1024 | 16 | 4 | 7B | 3e-4 | `base_350m.yaml` |
-| 800M | 24 | 1536 | 24 | 6 | 16B | 2e-4 | `base_800m.yaml` |
-| 1B | 24 | 1792 | 28 | 7 | 18B | 1.8e-4 | `base_1b.yaml` |
-| 1.3B | 24 | 2048 | 32 | 8 | 23B | 1.5e-4 | `base_1.3b.yaml` |
+| 125M | 12 | 768 | 12 | 3 | 1.25B | 6e-4 | `base_125m.yaml` |
+| 350M | 24 | 1024 | 16 | 4 | 3.5B | 3e-4 | `base_350m.yaml` |
+| 800M | 24 | 1536 | 24 | 6 | 8B | 2e-4 | `base_800m.yaml` |
+| 1B | 24 | 1792 | 28 | 7 | 9B | 1.8e-4 | `base_1b.yaml` |
+| 1.3B | 24 | 2048 | 32 | 8 | 11.5B | 1.5e-4 | `base_1.3b.yaml` |
 
 > The names are approximations. The **actual parameter count** including the 32K vocab and weight
 > tying is saved via `parameter_report` at training start (e.g. base_125m → ~99.5M, base_800m →
@@ -344,14 +344,14 @@ scaling (spec §13–18).
 
 ```bash
 python scripts/prepare_pretraining_data.py \
-    --output-dir data/pretrain --tokenizer artifacts/tokenizer --tokens 23e9
+    --output-dir data/pretrain --tokenizer artifacts/tokenizer --tokens 11.5e9
 ```
 
 This streams **both** English (95%) and Korean (5%) into separate per-language directories:
 `train/` + `val/` (English) and `train_ko/` + `val_ko/` (Korean). Only the needed share of each is
-downloaded. With `--tokens 23e9`, Korean is ~1.15B tokens (5%), not all of FineWeb2. Build the 23B
-corpus once: 125M reads the first 2.5B tokens, 350M the first 7B, 800M the first 16B, 1B the first
-18B, and 1.3B all of it (how much is actually read is set by each config's `training.max_tokens`).
+downloaded. With `--tokens 11.5e9`, Korean is ~0.58B tokens (5%), not all of FineWeb2. Build the
+11.5B corpus once: 125M reads the first 1.25B tokens, 350M the first 3.5B, 800M the first 8B, 1B the
+first 9B, and 1.3B all of it (how much is actually read is set by each config's `training.max_tokens`).
 
 **2) Train (single GPU)**
 
@@ -394,7 +394,7 @@ large corpora; setting `training.resume_fastforward: false` restarts the stream 
 beginning instead, and that fact is recorded in the checkpoints.
 
 **W&B projects** are split by training stage so runs stay organized. Every size in a stage shares
-one project, and size/variant is carried by the run name (`base-1b-tpp20`, `ko-1b-cpt-2b`, …).
+one project, and size/variant is carried by the run name (`base-1b-tpp10`, `ko-1b-cpt-2b`, …).
 `project.name` stays `kkoma-llm`; only `logging.project` differs:
 
 | Stage | Configs | W&B project |

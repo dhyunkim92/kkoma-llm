@@ -1,7 +1,7 @@
-# Kkoma-350M-Base (spec 13.2 / 15). 7B-token budget.
+# Kkoma-350M-Base (spec 13.2 / 15). 3.5B-token budget (tpp ~10).
 project:
   name: kkoma-llm
-  run_name: base-350m-tpp20
+  run_name: base-350m-tpp10
   seed: 42
   data_seed: 42
   init_seed: 42
@@ -48,7 +48,7 @@ training:
   precision: fp16
   global_batch_tokens: 262144
   micro_batch_size: 4
-  max_tokens: 7000000000
+  max_tokens: 3500000000
   grad_clip: 1.0
   log_interval: 10
   eval_interval: 1000

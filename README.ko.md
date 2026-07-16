@@ -312,11 +312,11 @@ step time·파라미터 수·추정 FLOPs(효율), GQA는 KV cache 크기·생�
 
 | 모델 | n_layer | d_model | n_head | n_kv_head | 토큰 버짓 | peak LR | config |
 |---|---|---|---|---|---|---|---|
-| 125M | 12 | 768 | 12 | 3 | 2.5B | 6e-4 | `base_125m.yaml` |
-| 350M | 24 | 1024 | 16 | 4 | 7B | 3e-4 | `base_350m.yaml` |
-| 800M | 24 | 1536 | 24 | 6 | 16B | 2e-4 | `base_800m.yaml` |
-| 1B | 24 | 1792 | 28 | 7 | 18B | 1.8e-4 | `base_1b.yaml` |
-| 1.3B | 24 | 2048 | 32 | 8 | 23B | 1.5e-4 | `base_1.3b.yaml` |
+| 125M | 12 | 768 | 12 | 3 | 1.25B | 6e-4 | `base_125m.yaml` |
+| 350M | 24 | 1024 | 16 | 4 | 3.5B | 3e-4 | `base_350m.yaml` |
+| 800M | 24 | 1536 | 24 | 6 | 8B | 2e-4 | `base_800m.yaml` |
+| 1B | 24 | 1792 | 28 | 7 | 9B | 1.8e-4 | `base_1b.yaml` |
+| 1.3B | 24 | 2048 | 32 | 8 | 11.5B | 1.5e-4 | `base_1.3b.yaml` |
 
 > 모델 이름은 근사치입니다. vocab 32K + weight tying을 포함한 **실제 파라미터 수**는 학습 시작 시
 > `parameter_report`로 저장됩니다(예: base_125m → 약 99.5M, base_800m → 약 645M, base_1b → 약 879M,
@@ -330,13 +330,13 @@ step time·파라미터 수·추정 FLOPs(효율), GQA는 KV cache 크기·생�
 
 ```bash
 python scripts/prepare_pretraining_data.py \
-    --output-dir data/pretrain --tokenizer artifacts/tokenizer --tokens 23e9
+    --output-dir data/pretrain --tokenizer artifacts/tokenizer --tokens 11.5e9
 ```
 
 이 명령은 영어(95%)와 한국어(5%)를 **둘 다** 스트리밍해 언어별 디렉터리로 씁니다:
 `train/` + `val/`(영어), `train_ko/` + `val_ko/`(한국어). 각 언어에서 필요한 분량만 받으므로
-`--tokens 23e9` 기준 한국어는 FineWeb2 전체가 아니라 약 1.15B 토큰(5%)만 내려받습니다.
-23B 코퍼스를 한 번 만들면 125M은 앞 2.5B, 350M은 앞 7B, 800M은 앞 16B, 1B는 앞 18B, 1.3B는
+`--tokens 11.5e9` 기준 한국어는 FineWeb2 전체가 아니라 약 0.58B 토큰(5%)만 내려받습니다.
+11.5B 코퍼스를 한 번 만들면 125M은 앞 1.25B, 350M은 앞 3.5B, 800M은 앞 8B, 1B는 앞 9B, 1.3B는
 전체를 사용합니다(실제로 읽는 양은 각 config의 `training.max_tokens`가 결정).
 
 **2) 학습 (단일 GPU)**
@@ -379,7 +379,7 @@ python scripts/train_pretraining.py --config configs/pretraining/base_1b.yaml \
 그 사실이 체크포인트에 기록됩니다.
 
 **W&B 프로젝트**는 학습 단계별로 분리됩니다. 같은 단계의 모든 크기는 하나의 프로젝트를 공유하고,
-크기·구성 구분은 run name(`base-1b-tpp20`, `ko-1b-cpt-2b` 등)으로 합니다. `project.name`은 항상
+크기·구성 구분은 run name(`base-1b-tpp10`, `ko-1b-cpt-2b` 등)으로 합니다. `project.name`은 항상
 `kkoma-llm`으로 두고, `logging.project`만 다릅니다.
 
 | 단계 | Config | W&B 프로젝트 |

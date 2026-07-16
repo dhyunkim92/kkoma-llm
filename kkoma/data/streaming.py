@@ -1,7 +1,7 @@
 """Document streaming from local JSONL/Parquet shards or HF ``datasets``.
 
 Each source yields cleaned text strings. Streaming keeps memory bounded for the
-16B-token master corpus.
+11.5B-token master corpus.
 
 Shuffling (spec section 14.2, "corpus 생성 전에 문서 순서를 seed 기반으로 섞고
 고정한다") is seed-based and applied only when a shuffle buffer is requested:
