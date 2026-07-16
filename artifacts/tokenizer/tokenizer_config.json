@@ -1,0 +1,29 @@
+{
+  "tokenizer_class": "PreTrainedTokenizerFast",
+  "model_max_length": 1024,
+  "bos_token": "<|bos|>",
+  "eos_token": "<|eos|>",
+  "pad_token": "<|pad|>",
+  "additional_special_tokens": [
+    "<|system|>",
+    "<|user|>",
+    "<|assistant|>",
+    "<|turn_end|>",
+    "<|reserved_0|>",
+    "<|reserved_1|>",
+    "<|reserved_2|>",
+    "<|reserved_3|>",
+    "<|reserved_4|>",
+    "<|reserved_5|>",
+    "<|reserved_6|>",
+    "<|reserved_7|>",
+    "<|reserved_8|>",
+    "<|reserved_9|>",
+    "<|reserved_10|>",
+    "<|reserved_11|>",
+    "<|reserved_12|>",
+    "<|reserved_13|>",
+    "<|reserved_14|>",
+    "<|reserved_15|>"
+  ]
+}

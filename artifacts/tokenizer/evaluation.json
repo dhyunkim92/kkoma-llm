@@ -1,0 +1,107 @@
+{
+  "vocab_size": 32768,
+  "embedding_parameters": 32768,
+  "special_tokens_single_id": {
+    "<|bos|>": true,
+    "<|eos|>": true,
+    "<|pad|>": true,
+    "<|system|>": true,
+    "<|user|>": true,
+    "<|assistant|>": true,
+    "<|turn_end|>": true
+  },
+  "english": {
+    "documents": 1,
+    "tokens": 7,
+    "tokens_per_word": 1.1666666666666667,
+    "tokens_per_char": 0.20588235294117646,
+    "compression_ratio_char_per_token": 4.857142857142857,
+    "avg_sequence_length": 7.0,
+    "byte_token_fraction": 0.0
+  },
+  "korean": {
+    "documents": 1,
+    "tokens": 9,
+    "tokens_per_word": 1.8,
+    "tokens_per_char": 0.4090909090909091,
+    "compression_ratio_char_per_token": 2.4444444444444446,
+    "avg_sequence_length": 9.0,
+    "byte_token_fraction": 0.0
+  },
+  "qualitative": [
+    {
+      "text": "The model is trained from scratch.",
+      "ids": [
+        550,
+        2708,
+        338,
+        8069,
+        490,
+        19200,
+        36
+      ],
+      "n_tokens": 7,
+      "roundtrip_ok": true
+    },
+    {
+      "text": "이 모델은 처음부터 직접 학습되었습니다.",
+      "ids": [
+        359,
+        7718,
+        484,
+        6049,
+        2120,
+        5516,
+        11618,
+        9613,
+        36
+      ],
+      "n_tokens": 9,
+      "roundtrip_ok": true
+    },
+    {
+      "text": "Kkoma-LLM은 영어와 한국어를 모두 처리합니다.",
+      "ids": [
+        65,
+        97,
+        5622,
+        35,
+        11961,
+        67,
+        484,
+        13815,
+        917,
+        2884,
+        9921,
+        4069,
+        8560,
+        1575,
+        36
+      ],
+      "n_tokens": 15,
+      "roundtrip_ok": true
+    },
+    {
+      "text": "def train_model(config):\n    return model",
+      "ids": [
+        10857,
+        6896,
+        85,
+        10877,
+        382,
+        30,
+        13755,
+        357,
+        3360,
+        221,
+        243,
+        243,
+        243,
+        3229,
+        2708
+      ],
+      "n_tokens": 15,
+      "roundtrip_ok": true
+    }
+  ]
+}
