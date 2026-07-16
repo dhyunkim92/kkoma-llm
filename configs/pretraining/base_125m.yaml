@@ -44,6 +44,7 @@ training:
   grad_clip: 1.0
   log_interval: 10
   eval_interval: 1000
+  downstream_interval: 1000
 
 optimizer:
   name: adamw
@@ -59,6 +60,25 @@ scheduler:
 
 distributed:
   backend: nccl
+
+evaluation:
+  # Frozen benchmark sets from scripts/prepare_downstream_data.py. Flip
+  # downstream_enabled to false, or enabled on a single task, to skip them.
+  downstream_enabled: true
+  downstream_batch_size: 16
+  downstream_tasks:
+  - name: hellaswag
+    path: data/downstream/hellaswag.jsonl
+    language: en
+    enabled: true
+  - name: arc_easy
+    path: data/downstream/arc_easy.jsonl
+    language: en
+    enabled: true
+  - name: kobest_hellaswag
+    path: data/downstream/kobest_hellaswag.jsonl
+    language: ko
+    enabled: true
 
 logging:
   backend: wandb

@@ -139,6 +139,9 @@ class TrainingConfig:
     log_interval: int = 10
     eval_interval: int = 1000
     eval_tokens: int = 10_000_000
+    # Downstream benchmarks run on their own cadence, separate from validation
+    # loss so it can be tuned without disturbing the loss curve. 0 disables them.
+    downstream_interval: int = 1000
     # On resume, skip the already-consumed prefix of the deterministic data
     # stream so training continues with the exact next batch (spec 18.3).
     # Re-tokenizes the skipped prefix once, which can take a while for large
@@ -170,6 +173,16 @@ class DistributedConfig:
 
 
 @dataclass
+class DownstreamTask:
+    """One frozen benchmark set built by scripts/prepare_downstream_data.py."""
+
+    name: str
+    path: str
+    language: str = "en"  # groups the en_avg / ko_avg aggregates
+    enabled: bool = True
+
+
+@dataclass
 class EvaluationConfig:
     # Validation cadence is training.eval_interval; this section holds the
     # fixed generation-sample settings (spec 21.4).
@@ -188,6 +201,16 @@ class EvaluationConfig:
         ]
     )
     sampling_seed: int = 1234
+
+    # ---- downstream benchmarks (spec 21.3) --------------------------------
+    # Master switch: false skips them everywhere regardless of the task list.
+    downstream_enabled: bool = True
+    # Questions scored per forward pass. Sequences are right-padded, which is
+    # safe here only because attention is causal: a real token at position i
+    # attends to positions <= i, so trailing pad can never reach it. Left
+    # padding would shift RoPE positions and silently corrupt the scores.
+    downstream_batch_size: int = 16
+    downstream_tasks: list[DownstreamTask] = field(default_factory=list)
 
 
 @dataclass

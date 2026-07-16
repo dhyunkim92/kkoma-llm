@@ -141,6 +141,7 @@ kkoma-llm/
 │   ├── train_pretraining.py
 │   ├── prepare_korean_data.py
 │   ├── train_continued.py
+│   ├── prepare_downstream_data.py
 │   ├── evaluate.py
 │   └── sample.py
 │
@@ -817,6 +818,30 @@ Korean validation: 5M~10M tokens
 
 영어와 한국어 loss를 별도로 계산한다.
 
+### 14.5 Downstream 평가 데이터
+
+학습 중 downstream 벤치마크(§21.3)에 쓰는 고정 평가 세트다. pretraining corpus와 달리 소량이고
+고정되어야 하므로 별도 스크립트(`prepare_downstream_data.py`)가 관리한다.
+
+```text
+data/downstream/hellaswag.jsonl          500 (label별 125 stratified)
+data/downstream/arc_easy.jsonl           500 (원본 선택지 유지, 무작위)
+data/downstream/kobest_hellaswag.jsonl   500 (test split 전체)
+data/downstream/downstream_manifest.json
+```
+
+각 레코드는 프롬프트까지 조립된 상태로 저장한다. 채점기가 태스크별 분기 없이 `문맥 + 선택지`만
+이어 붙이도록, 선택지 앞 공백(continuation 구분자)도 이 단계에서 넣는다. 프롬프트 형식은
+lm-evaluation-harness를 따라 영어 점수가 공개 수치와 비교되게 한다.
+
+```text
+{"id": ..., "context": "...", "choices": [" ...", ...], "label": 0}
+```
+
+manifest에 원본 split·원본 크기·샘플 수·seed·데이터셋 revision·결과 파일 checksum을 기록한다.
+seed(42)와 revision을 고정하므로 재실행 시 동일한 문항이 재현된다. 준비가 끝나면 원본 데이터셋
+다운로드는 삭제한다(FineWeb 등 다른 캐시는 건드리지 않는다).
+
 ---
 
 ## 15. Base Pretraining 레시피
@@ -1155,20 +1180,52 @@ Kkoma-LLM에서는 chat generation을 구현 필수로 두지 않는다.
 
 ### 21.3 Downstream
 
-Base 모델에 적합한 zero-shot 또는 few-shot 평가를 사용한다.
+Base 모델에 적합한 zero-shot 평가를 학습 도중 주기적으로 측정한다. 채점은 선택지별
+length-normalized continuation log-likelihood 방식이다. 각 선택지의 `log p(선택지 | 문맥)`을
+토큰 수로 나눈 뒤 가장 높은 것을 예측으로 삼는다(lm-evaluation-harness의 `acc_norm`과 동일).
 
-초기 후보:
+현재 태스크:
 
-- LAMBADA
-- HellaSwag
-- PIQA
-- ARC-Easy
-- WinoGrande
-- 한국어 상식 또는 언어 이해 benchmark 일부
+- HellaSwag (validation split, 영어): 상식 추론
+- ARC-Easy (test split, 영어): 과학 상식 4지선다
+- KoBEST-HellaSwag (test split, 한국어): 한국어 상식 추론
 
-평가 harness 연동 시 tokenizer와 prompt format을 고정한다.
+세 태스크 모두 문항 수를 500개로 맞춘다. HellaSwag은 정답 label 0~3별로 125개씩
+stratified sampling하고, KoBEST는 test split 전체가 정확히 500개라 그대로 쓴다. ARC-Easy는
+원본 선택지 구성(대부분 4지선다, 일부 3·5지선다)을 변형하지 않고 500개를 무작위 추출한다.
 
-작은 모델의 benchmark 절대 점수보다 모델 크기 및 단계별 변화에 초점을 둔다.
+샘플링은 `prepare_downstream_data.py`에서 한 번만 수행해 JSONL로 고정한다(§14.5). 이후 모든
+평가는 같은 문항을 채점하므로 스텝 간·모델 크기 간 곡선이 서로 비교 가능하다. seed 42와 데이터셋
+revision을 함께 고정하므로 원본을 지우고 다시 만들어도 동일한 500문항이 나온다.
+
+측정 주기는 `training.downstream_interval`(기본 1,000스텝)이며 validation loss의
+`eval_interval`과는 별도 파라미터라, loss 곡선을 건드리지 않고 독립적으로 조절할 수 있다.
+채점 비용이 작아(500문항 전체를 8-GPU로 나누면 스텝 하나 남짓) validation과 같은 주기로 돌려도
+부담이 없다. step 0에서 baseline을 한 번 측정해 이후 상승이 실제 학습 신호임을 확인할 수 있게 한다.
+다만 500문항 accuracy는 standard error가 약 2%라 스텝 간 변동이 크므로, 절대값보다 여러 스텝에
+걸친 추세로 읽는다.
+
+태스크마다 세 지표를 기록한다.
+
+- `acc_norm`: 위 정확도
+- `margin_max`: 정답 logprob에서 가장 강한 오답을 뺀 값. 정답을 맞힐 때만 양수라 부호가
+  곧 정오답이다.
+- `margin_mean`: 정답 logprob에서 오답 평균을 뺀 값. 정답이 뒤집히기 전부터 연속적으로
+  움직이므로, accuracy가 chance에 붙어 있는 초반에도 학습 여부를 볼 수 있다.
+
+집계 지표도 함께 남긴다.
+
+- `downstream/en_avg`: HellaSwag·ARC-Easy accuracy 평균
+- `downstream/ko_avg`: KoBEST-HellaSwag accuracy
+- `downstream/overall_avg`: 세 태스크 accuracy의 단순 평균
+
+작은 모델의 benchmark 절대 점수보다 모델 크기 및 단계별 변화에 초점을 둔다. 특히 이 규모(tpp
+~10)에서 HellaSwag은 오래 chance(25%) 근처에 머무르고, KoBEST는 Base가 한국어를 5%만 보므로
+Phase 3 continued pretraining 전까지 거의 chance에 가깝다. 500문항 accuracy는 변동이 크므로
+best checkpoint 선정에는 쓰지 않고, 그 기준은 validation loss로 유지한다(§18.2).
+
+PIQA·WinoGrande·LAMBADA 등은 태스크 registry에 formatter만 추가하면 확장되도록 구조를 열어
+두었다. LAMBADA는 multiple-choice가 아니라 마지막 토큰 예측이라 별도 채점기를 쓴다.
 
 ### 21.4 Generation Samples
 
@@ -1321,8 +1378,10 @@ model:
 training:
   precision: fp16
   global_batch_tokens: 262144
-  max_tokens: 2500000000
+  max_tokens: 1250000000
   grad_clip: 1.0
+  eval_interval: 1000          # validation loss 주기
+  downstream_interval: 1000    # downstream 벤치마크 주기 (0이면 비활성)
 
 optimizer:
   name: adamw
@@ -1335,6 +1394,23 @@ scheduler:
   name: cosine
   warmup_ratio: 0.02
   min_lr_ratio: 0.1
+
+evaluation:
+  downstream_enabled: true     # 전체 스위치
+  downstream_batch_size: 16
+  downstream_tasks:            # §14.5에서 준비한 고정 세트
+  - name: hellaswag
+    path: data/downstream/hellaswag.jsonl
+    language: en               # en_avg / ko_avg 집계 그룹
+    enabled: true
+  - name: arc_easy
+    path: data/downstream/arc_easy.jsonl
+    language: en
+    enabled: true
+  - name: kobest_hellaswag
+    path: data/downstream/kobest_hellaswag.jsonl
+    language: ko
+    enabled: true
 
 logging:
   backend: wandb

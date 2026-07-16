@@ -150,6 +150,8 @@ python scripts/train_architecture.py --config configs/architecture/core_125m_mod
 
 # Phase 2: base pretraining (single GPU)
 python scripts/prepare_pretraining_data.py --output-dir data/pretrain --tokenizer artifacts/tokenizer
+# optional: frozen downstream benchmark sets, scored during training (see §7)
+python scripts/prepare_downstream_data.py --output-dir data/downstream
 python scripts/train_pretraining.py --config configs/pretraining/base_1b.yaml
 
 # Phase 2: multi-GPU (8 GPUs on one node via torchrun)
@@ -461,6 +463,33 @@ python scripts/evaluate.py \
 | `--max-batches` | `50` | number of validation batches |
 | `--no-generation` | (off) | skip the generation-sample step |
 
+**Downstream benchmarks during training**: three zero-shot multiple-choice sets are scored on a
+separate cadence (`downstream_interval`, default every 1,000 steps, plus a step-0 baseline),
+alongside the validation-loss curve. Prepare the frozen sets once:
+
+```bash
+python scripts/prepare_downstream_data.py --output-dir data/downstream
+```
+
+This samples 500 questions per task and freezes them to JSONL, then deletes the source downloads.
+The sampling is fixed by `--seed` (default 42) and the pinned dataset revisions, so rebuilding
+yields the identical questions and every model sees the same test.
+
+| Task | Split | Language | Sampling |
+|---|---|---|---|
+| HellaSwag | validation | English | 500, stratified 125 per gold label |
+| ARC-Easy | test | English | 500, random, original choice sets kept |
+| KoBEST-HellaSwag | test | Korean | all 500 |
+
+Scoring is length-normalized continuation log-likelihood (`acc_norm`). Each task also logs a
+`margin_max` and `margin_mean` (gold minus the strongest / average distractor): near chance the
+accuracy barely moves while the margins still do, so they show the model is learning before any
+answer flips. Aggregates are `downstream/en_avg`, `downstream/ko_avg`, and `downstream/overall_avg`.
+At this scale (tpp ~10) HellaSwag stays near chance (25%) for a long time, and KoBEST barely moves
+until Phase 3, so these are for watching the trend, not the absolute score. A 500-question set is
+too noisy to select on, so **best-checkpoint selection stays on validation loss**. Turn the whole
+thing off with `downstream_enabled: false`, or drop a single task with its `enabled: false`.
+
 **Generate text**: KV-cache autoregressive generation. The same seed reproduces the same output.
 
 ```bash
@@ -509,10 +538,19 @@ training:
   precision: fp16          # use fp32 for CPU tests
   global_batch_tokens: 262144
   micro_batch_size: 4
-  max_tokens: 2500000000
+  max_tokens: 1250000000
+  eval_interval: 1000       # validation-loss cadence
+  downstream_interval: 1000 # benchmark cadence (0 disables)
 
 optimizer: { name: adamw, learning_rate: 0.0006, beta1: 0.9, beta2: 0.95, weight_decay: 0.1 }
 scheduler: { name: cosine, warmup_ratio: 0.02, min_lr_ratio: 0.1 }
+
+evaluation:                 # frozen sets from prepare_downstream_data.py (see §7)
+  downstream_enabled: true
+  downstream_tasks:
+  - { name: hellaswag,        path: data/downstream/hellaswag.jsonl,        language: en }
+  - { name: arc_easy,         path: data/downstream/arc_easy.jsonl,         language: en }
+  - { name: kobest_hellaswag, path: data/downstream/kobest_hellaswag.jsonl, language: ko }
 ```
 
 Build or inspect one from code:
@@ -553,6 +591,19 @@ then fixed (spec §14.2, `--shuffle-buffer`, default 10,000).
 
 `data_manifest.json` records the sources, seeds, shuffle settings, holdout method, document and
 token counts, and per-shard SHA-256 checksums.
+
+**Downstream evaluation sets** live separately under `data/downstream/` (spec §14.5), written by
+`prepare_downstream_data.py` rather than the `prepare_*` corpus scripts. Each is a small frozen
+JSONL of 500 questions, with `downstream_manifest.json` recording the source split, original size,
+sample count, seed, dataset revision, and file checksum.
+
+```text
+data/downstream/
+├── hellaswag.jsonl           # 500, stratified by gold label
+├── arc_easy.jsonl            # 500, original choice sets kept
+├── kobest_hellaswag.jsonl    # 500 (whole test split)
+└── downstream_manifest.json
+```
 
 ---
 

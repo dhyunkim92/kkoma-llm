@@ -152,9 +152,13 @@ class Trainer:
         val_loaders: Optional[dict] = None,
         logger: Optional[Logger] = None,
         provenance: Optional[dict] = None,
+        tokenizer=None,
+        downstream_tasks: Optional[list] = None,
     ):
         self.config = config
         self.provenance = provenance or {}
+        self.tokenizer = tokenizer
+        self.downstream_tasks = downstream_tasks or []
         self.model = model  # possibly DDP-wrapped
         self.raw_model = raw_model  # underlying KkomaModel
         self.optimizer = optimizer
@@ -307,6 +311,12 @@ class Trainer:
         self.model.train()
         self._banner()
 
+        # Baseline before any update: downstream scores start at chance, and the
+        # step-0 point is what shows a later rise is real rather than a
+        # different measurement. Skipped on resume, where step > 0 already.
+        if self.state.global_step == 0:
+            self._evaluate_downstream(0)
+
         bar = _make_step_bar(self.max_steps, self.state.global_step, self.config.project.run_name)
         while self.state.global_step < self.max_steps:
             metrics = self._train_step(data_iter)
@@ -327,11 +337,17 @@ class Trainer:
                 self._log_train(metrics, step, tokens_per_second=tps)
             if step % self.config.training.eval_interval == 0:
                 self._evaluate(step)
+            if (
+                self.config.training.downstream_interval > 0
+                and step % self.config.training.downstream_interval == 0
+            ):
+                self._evaluate_downstream(step)
             if step % self.config.checkpoint.save_interval == 0:
                 self._save(step, tag=f"step_{step:08d}")
 
         bar.close()
         self._evaluate(self.state.global_step)
+        self._evaluate_downstream(self.state.global_step)
         self._save(self.state.global_step, tag="final")
         self.logger.finish()
         return self.state
@@ -391,6 +407,71 @@ class Trainer:
                 f"(ppl {results['val/perplexity']:.1f})"
                 + (f" | {per_lang}" if per_lang else "")
                 + ("  ← best" if is_best else "")
+            )
+        self.model.train()
+
+    @torch.no_grad()
+    def _evaluate_downstream(self, step: int) -> None:
+        """Score the frozen benchmark sets (spec 21.3).
+
+        Deliberately does not touch ``best_val_loss``: 500 questions carry a
+        standard error near 2%, so picking checkpoints on this would chase
+        noise. Validation loss stays the selection criterion.
+        """
+
+        ev = self.config.evaluation
+        if not (ev.downstream_enabled and self.downstream_tasks and self.tokenizer):
+            return
+        if step == getattr(self, "_last_downstream_step", None):
+            return
+        self._last_downstream_step = step
+
+        from kkoma.evaluation.downstream import evaluate_task
+
+        self.model.eval()
+        results: dict = {}
+        by_lang: dict[str, list[float]] = {}
+        for name, language, examples in self.downstream_tasks:
+            # Deal the questions round-robin across ranks. evaluate_task calls
+            # the reduction exactly once per rank, including on a rank that
+            # draws nothing, so the collective stays matched.
+            shard = examples[self.dist.rank :: self.dist.world_size]
+            with torch.autocast(
+                device_type=self.device.type, dtype=self.amp_dtype, enabled=self.use_amp
+            ):
+                r = evaluate_task(
+                    self.raw_model,
+                    self.tokenizer,
+                    shard,
+                    self.device,
+                    batch_size=ev.downstream_batch_size,
+                    reduce_fn=all_reduce_sum,
+                )
+            results[f"downstream/{name}_acc_norm"] = r["acc_norm"]
+            results[f"downstream/{name}_margin_max"] = r["margin_max"]
+            results[f"downstream/{name}_margin_mean"] = r["margin_mean"]
+            by_lang.setdefault(language, []).append(r["acc_norm"])
+
+        def _mean(xs: list[float]) -> float:
+            return sum(xs) / len(xs) if xs else float("nan")
+
+        every = [a for accs in by_lang.values() for a in accs]
+        if "en" in by_lang:
+            results["downstream/en_avg"] = _mean(by_lang["en"])
+        if "ko" in by_lang:
+            results["downstream/ko_avg"] = _mean(by_lang["ko"])
+        results["downstream/overall_avg"] = _mean(every)
+        self.logger.log(results, step)
+
+        if is_main_process():
+            per_task = " ".join(
+                f"{k.split('/')[1].rsplit('_acc_norm', 1)[0]} {v:.3f}"
+                for k, v in results.items()
+                if k.endswith("_acc_norm")
+            )
+            _console(
+                f"[downstream @ step {step}] overall {results['downstream/overall_avg']:.3f}"
+                + (f" | {per_task}" if per_task else "")
             )
         self.model.train()
 

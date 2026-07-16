@@ -136,6 +136,36 @@ def build_val_loaders(
     return loaders
 
 
+def build_downstream_tasks(config: RunConfig) -> list:
+    """Load the frozen benchmark sets named in the config (spec 21.3).
+
+    Returns ``[(name, language, examples), ...]``. A task whose file is missing
+    is reported and skipped rather than raising: the sets come from a separate
+    prepare step, and a run should not die at step 0 because someone has not
+    fetched them yet.
+    """
+
+    from kkoma.evaluation.downstream import load_examples
+
+    ev = config.evaluation
+    if not ev.downstream_enabled:
+        return []
+
+    tasks = []
+    for task in ev.downstream_tasks:
+        if not task.enabled:
+            continue
+        if not os.path.exists(task.path):
+            if is_main_process():
+                print(
+                    f"[downstream] {task.name}: {task.path} not found; skipping "
+                    "(run scripts/prepare_downstream_data.py)"
+                )
+            continue
+        tasks.append((task.name, task.language, load_examples(task.path)))
+    return tasks
+
+
 def build_model(config: RunConfig, device: torch.device) -> KkomaModel:
     model = KkomaModel(config.model).to(device)
     return model
@@ -238,6 +268,8 @@ def run_training(
         val_loaders=val_loaders,
         logger=logger,
         provenance=collect_provenance(config),
+        tokenizer=tokenizer,
+        downstream_tasks=build_downstream_tasks(config),
     )
 
     if ckpt is not None:

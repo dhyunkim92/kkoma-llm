@@ -146,6 +146,8 @@ python scripts/train_architecture.py --config configs/architecture/core_125m_mod
 
 # Phase 2: Base 사전학습 (단일 GPU)
 python scripts/prepare_pretraining_data.py --output-dir data/pretrain --tokenizer artifacts/tokenizer
+# 선택: 학습 중 채점하는 고정 downstream 벤치마크 세트 (§7 참고)
+python scripts/prepare_downstream_data.py --output-dir data/downstream
 python scripts/train_pretraining.py --config configs/pretraining/base_1b.yaml
 
 # Phase 2: 멀티 GPU (한 노드 8장, torchrun)
@@ -441,6 +443,33 @@ python scripts/evaluate.py \
 | `--max-batches` | `50` | 검증에 사용할 배치 수 |
 | `--no-generation` | (꺼짐) | 생성 샘플 단계 건너뛰기 |
 
+**학습 중 downstream 벤치마크**: zero-shot 객관식 세 세트를 validation loss와는 별도 주기로
+채점합니다(`downstream_interval`, 기본 1,000스텝 + step 0 baseline). 고정 세트는 한 번만
+준비합니다.
+
+```bash
+python scripts/prepare_downstream_data.py --output-dir data/downstream
+```
+
+태스크별 500문항을 뽑아 JSONL로 고정한 뒤 원본 다운로드는 삭제합니다. 샘플링은 `--seed`(기본 42)와
+고정된 데이터셋 revision으로 결정되므로, 다시 만들어도 같은 문항이 나오고 모든 모델이 동일한 세트를
+봅니다.
+
+| 태스크 | split | 언어 | 샘플링 |
+|---|---|---|---|
+| HellaSwag | validation | 영어 | 500, 정답 label별 125 stratified |
+| ARC-Easy | test | 영어 | 500, 무작위, 원본 선택지 유지 |
+| KoBEST-HellaSwag | test | 한국어 | 500 전체 |
+
+채점은 length-normalized continuation log-likelihood(`acc_norm`)입니다. 태스크마다 `margin_max`,
+`margin_mean`(정답에서 가장 강한 / 평균 오답을 뺀 값)도 기록합니다. chance 근처에서는 accuracy가
+잘 안 움직이는 동안에도 margin은 움직이므로, 정답이 뒤집히기 전에 학습 여부를 볼 수 있습니다. 집계
+지표는 `downstream/en_avg`, `downstream/ko_avg`, `downstream/overall_avg`입니다. 이 규모(tpp ~10)에서
+HellaSwag은 오래 chance(25%) 근처에 머물고 KoBEST는 Phase 3 전까지 거의 안 움직이므로, 절대 점수보다
+추세를 보는 용도입니다. 500문항은 변동이 커서 best checkpoint 선정에는 쓰지 않고 **그 기준은
+validation loss로 유지**합니다. `downstream_enabled: false`로 전체를 끄거나, 개별 태스크의
+`enabled: false`로 하나만 뺄 수 있습니다.
+
 **텍스트 생성**: KV cache 자기회귀 생성. 같은 시드면 결과가 재현됩니다.
 
 ```bash
@@ -489,10 +518,19 @@ training:
   precision: fp16          # CPU 테스트는 fp32
   global_batch_tokens: 262144
   micro_batch_size: 4
-  max_tokens: 2500000000
+  max_tokens: 1250000000
+  eval_interval: 1000       # validation loss 주기
+  downstream_interval: 1000 # 벤치마크 주기 (0이면 비활성)
 
 optimizer: { name: adamw, learning_rate: 0.0006, beta1: 0.9, beta2: 0.95, weight_decay: 0.1 }
 scheduler: { name: cosine, warmup_ratio: 0.02, min_lr_ratio: 0.1 }
+
+evaluation:                 # prepare_downstream_data.py로 준비한 고정 세트 (§7 참고)
+  downstream_enabled: true
+  downstream_tasks:
+  - { name: hellaswag,        path: data/downstream/hellaswag.jsonl,        language: en }
+  - { name: arc_easy,         path: data/downstream/arc_easy.jsonl,         language: en }
+  - { name: kobest_hellaswag, path: data/downstream/kobest_hellaswag.jsonl, language: ko }
 ```
 
 코드에서 직접 만들거나 검사하기:
@@ -531,6 +569,19 @@ data/pretrain/
 
 `data_manifest.json`에는 소스·시드·셔플 설정·holdout 방식·문서 수·토큰 수·샤드 SHA-256
 체크섬이 기록됩니다.
+
+**Downstream 평가 세트**는 `data/downstream/` 아래에 따로 둡니다(spec §14.5). `prepare_*` 코퍼스
+스크립트가 아니라 `prepare_downstream_data.py`가 씁니다. 각 파일은 500문항짜리 작은 고정 JSONL이고,
+`downstream_manifest.json`에 원본 split·원본 크기·샘플 수·seed·데이터셋 revision·파일 체크섬이
+기록됩니다.
+
+```text
+data/downstream/
+├── hellaswag.jsonl           # 500, 정답 label별 stratified
+├── arc_easy.jsonl            # 500, 원본 선택지 유지
+├── kobest_hellaswag.jsonl    # 500 (test split 전체)
+└── downstream_manifest.json
+```
 
 ---
 
