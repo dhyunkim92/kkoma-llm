@@ -162,6 +162,11 @@ python scripts/prepare_korean_data.py --output-dir data/korean --tokenizer artif
 python scripts/train_continued.py --config configs/continued_pretraining/ko_1b.yaml \
     --init-from artifacts/checkpoints/base-1b/final.pt
 
+# Phase 3: 멀티 GPU (한 노드 8장, torchrun)
+torchrun --nproc_per_node=8 scripts/train_continued.py \
+    --config configs/continued_pretraining/ko_1b.yaml \
+    --init-from artifacts/checkpoints/base-1b/final.pt
+
 # 평가 / 생성
 python scripts/evaluate.py --checkpoint artifacts/checkpoints/base-1b/final.pt \
     --config configs/pretraining/base_1b.yaml --output artifacts/evaluation/base_1b.json
@@ -428,10 +433,18 @@ python scripts/prepare_korean_data.py \
     --output-dir data/korean --tokenizer artifacts/tokenizer --tokens 2e9
 ```
 
-**2) Base 가중치로 시작해 한국어 학습**
+**2) Base 가중치로 시작해 한국어 학습 (단일 GPU)**
 
 ```bash
 python scripts/train_continued.py \
+    --config configs/continued_pretraining/ko_1b.yaml \
+    --init-from artifacts/checkpoints/base-1b/final.pt
+```
+
+**2′) 학습 (멀티 GPU, V100 8장)**
+
+```bash
+torchrun --nproc_per_node=8 scripts/train_continued.py \
     --config configs/continued_pretraining/ko_1b.yaml \
     --init-from artifacts/checkpoints/base-1b/final.pt
 ```

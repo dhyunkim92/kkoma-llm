@@ -166,6 +166,11 @@ python scripts/prepare_korean_data.py --output-dir data/korean --tokenizer artif
 python scripts/train_continued.py --config configs/continued_pretraining/ko_1b.yaml \
     --init-from artifacts/checkpoints/base-1b/final.pt
 
+# Phase 3: multi-GPU (8 GPUs on one node via torchrun)
+torchrun --nproc_per_node=8 scripts/train_continued.py \
+    --config configs/continued_pretraining/ko_1b.yaml \
+    --init-from artifacts/checkpoints/base-1b/final.pt
+
 # evaluation / generation
 python scripts/evaluate.py --checkpoint artifacts/checkpoints/base-1b/final.pt \
     --config configs/pretraining/base_1b.yaml --output artifacts/evaluation/base_1b.json
@@ -446,10 +451,18 @@ python scripts/prepare_korean_data.py \
     --output-dir data/korean --tokenizer artifacts/tokenizer --tokens 2e9
 ```
 
-**2) Start from the Base weights and train on Korean**
+**2) Start from the Base weights and train on Korean (single GPU)**
 
 ```bash
 python scripts/train_continued.py \
+    --config configs/continued_pretraining/ko_1b.yaml \
+    --init-from artifacts/checkpoints/base-1b/final.pt
+```
+
+**2′) Train (multi-GPU, 8× V100)**
+
+```bash
+torchrun --nproc_per_node=8 scripts/train_continued.py \
     --config configs/continued_pretraining/ko_1b.yaml \
     --init-from artifacts/checkpoints/base-1b/final.pt
 ```
