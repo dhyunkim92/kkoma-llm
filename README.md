@@ -354,11 +354,34 @@ python scripts/prepare_pretraining_data.py \
     --output-dir data/pretrain --tokenizer artifacts/tokenizer --tokens 11.5e9
 ```
 
-This streams **both** English (95%) and Korean (5%) into separate per-language directories:
-`train/` + `val/` (English) and `train_ko/` + `val_ko/` (Korean). Only the needed share of each is
-downloaded. With `--tokens 11.5e9`, Korean is ~0.58B tokens (5%), not all of FineWeb2. Build the
-11.5B corpus once: 125M reads the first 1.25B tokens, 350M the first 3.5B, 800M the first 8B, 1B the
-first 9B, and 1.3B all of it (how much is actually read is set by each config's `training.max_tokens`).
+**Datasets.** Both corpora stream straight from the Hugging Face Hub — nothing is vendored in this
+repo. They land in separate per-language directories: `train/` + `val/` (English) and `train_ko/` +
+`val_ko/` (Korean), and only the needed share of each is downloaded.
+
+| Source | Hugging Face dataset | Language | Share of the mix |
+|---|---|---|---|
+| FineWeb-Edu | [`HuggingFaceFW/fineweb-edu`](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) (`default`) | English | 95% |
+| FineWeb2 | [`HuggingFaceFW/fineweb-2`](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2) (`kor_Hang`) | Korean | 5% |
+
+- **FineWeb-Edu** — Hugging Face's English pretraining corpus: the Common-Crawl-derived FineWeb,
+  filtered a second time by an "educational quality" classifier so only high-value web pages
+  survive. It runs to trillions of tokens; Kkoma streams only the leading slice it needs.
+- **FineWeb2** — the multilingual successor to FineWeb (1000+ languages). Kkoma uses only its
+  `kor_Hang` (Korean / Hangul) slice.
+
+**How much is used.** `--tokens 11.5e9` builds one 11.5B-token corpus (95% EN / 5% KO, so Korean is
+only ~0.58B tokens — a thin slice of FineWeb2, not all of it) plus a disjoint validation set
+(~20M EN / ~10M KO tokens, held out by a document-level sha256 hash so train and val never overlap).
+Each model then reads only the leading part of that single corpus, set by its config's
+`training.max_tokens`:
+
+| Model | Tokens read | tokens-per-parameter |
+|---|---|---|
+| 125M | 1.25B | ~10 |
+| 350M | 3.5B | ~10 |
+| 800M | 8B | ~10 |
+| 1B | 9B | ~10 |
+| 1.3B | 11.5B | ~10 |
 
 **1′) Prepare downstream benchmark sets (optional)**
 
@@ -373,11 +396,27 @@ This samples 500 questions per task and freezes them to JSONL, then deletes the 
 The sampling is fixed by `--seed` (default 42) and the pinned dataset revisions, so rebuilding
 yields the identical questions and every model sees the same test.
 
-| Task | Split | Language | Sampling |
+| Task | Hugging Face source | Language | Sampling |
 |---|---|---|---|
-| HellaSwag | validation | English | 500, stratified 125 per gold label |
-| ARC-Easy | test | English | 500, random, original choice sets kept |
-| KoBEST-HellaSwag | test | Korean | all 500 |
+| HellaSwag | [`Rowan/hellaswag`](https://huggingface.co/datasets/Rowan/hellaswag) (`validation`) | English | 500, stratified 125 per gold label |
+| ARC-Easy | [`allenai/ai2_arc`](https://huggingface.co/datasets/allenai/ai2_arc) (`ARC-Easy`, `test`) | English | 500, random, original choice sets kept |
+| KoBEST-HellaSwag | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`hellaswag`, `test`) | Korean | all 500 |
+
+All three are **multiple-choice** tasks scored by length-normalized accuracy (`acc_norm`): the model
+assigns a likelihood to each candidate continuation and the highest-scoring one is its answer — no
+task-specific head, no fine-tuning. Question counts are capped at 500, so the standard error near
+chance is ~2%: read them as a trend across sizes and stages, not as headline scores.
+
+- **HellaSwag** — commonsense sentence completion. Given a short situation (from ActivityNet /
+  WikiHow), pick the most plausible of four endings. Built by adversarial filtering so wrong endings
+  read fluently; humans score >95% while small models hover near the 25% chance line.
+- **ARC-Easy** — the easy split of the AI2 Reasoning Challenge: real grade-school science exam
+  questions, mostly 4-way multiple choice. (The sibling ARC-Challenge holds the questions that simple
+  retrieval methods get wrong; Easy is the rest.)
+- **KoBEST-HellaSwag** — the Korean-language HellaSwag from **KoBEST** (Korean Balanced Evaluation of
+  Significant Tasks, released by SKT). Same commonsense-completion format, in native Korean rather
+  than translation. Because the Base sees only 5% Korean, this is the task that stays near chance
+  until Phase 3 moves it.
 
 **2) Train (single GPU)**
 
@@ -450,6 +489,20 @@ uses 1B.
 python scripts/prepare_korean_data.py \
     --output-dir data/korean --tokenizer artifacts/tokenizer --tokens 2e9
 ```
+
+**Datasets.** The same two Hugging Face corpora as Phase 2, re-mixed toward Korean. The English
+share is *replay*: its only job is to keep the English ability the Base already learned from
+eroding during Korean adaptation.
+
+| Source | Hugging Face dataset | Role | Share (of 2B) |
+|---|---|---|---|
+| FineWeb2 | [`HuggingFaceFW/fineweb-2`](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2) (`kor_Hang`) | Korean adaptation | 70% (~1.4B tokens) |
+| FineWeb-Edu | [`HuggingFaceFW/fineweb-edu`](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) (`default`) | English replay (anti-forgetting) | 30% (~0.6B tokens) |
+
+**How much is used.** `--tokens 2e9` builds a 2B-token corpus (1.4B KO + 0.6B EN) into `train_ko/` +
+`train_en/`, plus a held-out validation set (~10M KO / ~5M EN tokens) split into `ko` / `en` so
+Korean gain and English forgetting are tracked separately (see "Measuring forgetting" below). The
+same recipe applies to every Base size; only the model dims differ.
 
 **2) Start from the Base weights and train on Korean (single GPU)**
 

@@ -340,11 +340,33 @@ python scripts/prepare_pretraining_data.py \
     --output-dir data/pretrain --tokenizer artifacts/tokenizer --tokens 11.5e9
 ```
 
-이 명령은 영어(95%)와 한국어(5%)를 **둘 다** 스트리밍해 언어별 디렉터리로 씁니다:
-`train/` + `val/`(영어), `train_ko/` + `val_ko/`(한국어). 각 언어에서 필요한 분량만 받으므로
-`--tokens 11.5e9` 기준 한국어는 FineWeb2 전체가 아니라 약 0.58B 토큰(5%)만 내려받습니다.
-11.5B 코퍼스를 한 번 만들면 125M은 앞 1.25B, 350M은 앞 3.5B, 800M은 앞 8B, 1B는 앞 9B, 1.3B는
-전체를 사용합니다(실제로 읽는 양은 각 config의 `training.max_tokens`가 결정).
+**데이터셋.** 두 코퍼스 모두 Hugging Face Hub에서 바로 스트리밍하며, 저장소에는 원본을 담지
+않습니다. 언어별 디렉터리에 나눠 저장되고(`train/` + `val/`(영어), `train_ko/` + `val_ko/`(한국어)),
+각 언어에서 필요한 분량만 내려받습니다.
+
+| 소스 | Hugging Face 데이터셋 | 언어 | 혼합 비율 |
+|---|---|---|---|
+| FineWeb-Edu | [`HuggingFaceFW/fineweb-edu`](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) (`default`) | 영어 | 95% |
+| FineWeb2 | [`HuggingFaceFW/fineweb-2`](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2) (`kor_Hang`) | 한국어 | 5% |
+
+- **FineWeb-Edu** — Hugging Face가 공개한 영어 사전학습 코퍼스. Common Crawl에서 추출·정제한
+  FineWeb을 "교육적 가치" 분류기로 한 번 더 걸러 고품질 웹 문서만 남긴 것입니다. 전체 규모는 수조
+  토큰에 이르며, Kkoma는 필요한 앞부분만 스트리밍해 씁니다.
+- **FineWeb2** — FineWeb의 다국어 후속판(1000개 이상 언어). Kkoma는 그중 `kor_Hang`(한국어/한글)
+  슬라이스만 사용합니다.
+
+**얼마나 쓰나.** `--tokens 11.5e9`는 11.5B 토큰 코퍼스(영어 95% / 한국어 5%, 따라서 한국어는
+FineWeb2 전체가 아니라 약 0.58B 토큰만)와, 이와 겹치지 않는 검증 세트(약 영어 20M / 한국어 10M
+토큰, 문서 단위 sha256 해시로 홀드아웃하여 train/val이 절대 겹치지 않음)를 한 번에 만듭니다.
+이후 각 모델은 이 하나의 코퍼스에서 앞부분만, 각 config의 `training.max_tokens`만큼 읽습니다:
+
+| 모델 | 읽는 토큰 | 파라미터당 토큰 |
+|---|---|---|
+| 125M | 1.25B | ~10 |
+| 350M | 3.5B | ~10 |
+| 800M | 8B | ~10 |
+| 1B | 9B | ~10 |
+| 1.3B | 11.5B | ~10 |
 
 **1′) downstream 벤치마크 세트 준비 (선택)**
 
@@ -359,11 +381,26 @@ python scripts/prepare_downstream_data.py --output-dir data/downstream
 고정된 데이터셋 revision으로 결정되므로, 다시 만들어도 같은 문항이 나오고 모든 모델이 동일한 세트를
 봅니다.
 
-| 태스크 | split | 언어 | 샘플링 |
+| 태스크 | Hugging Face 소스 | 언어 | 샘플링 |
 |---|---|---|---|
-| HellaSwag | validation | 영어 | 500, 정답 label별 125 stratified |
-| ARC-Easy | test | 영어 | 500, 무작위, 원본 선택지 유지 |
-| KoBEST-HellaSwag | test | 한국어 | 500 전체 |
+| HellaSwag | [`Rowan/hellaswag`](https://huggingface.co/datasets/Rowan/hellaswag) (`validation`) | 영어 | 500, 정답 label별 125 stratified |
+| ARC-Easy | [`allenai/ai2_arc`](https://huggingface.co/datasets/allenai/ai2_arc) (`ARC-Easy`, `test`) | 영어 | 500, 무작위, 원본 선택지 유지 |
+| KoBEST-HellaSwag | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`hellaswag`, `test`) | 한국어 | 500 전체 |
+
+세 태스크 모두 **다지선다(multiple-choice)** 문제로, 길이 정규화 정확도(`acc_norm`)로 채점합니다.
+모델이 각 후보 이어짐에 확률을 매기고 가장 높은 것을 답으로 고르는 방식이라 태스크 전용 헤드나
+파인튜닝이 필요 없습니다. 문항 수를 500으로 제한했기 때문에 chance 근처에서 표준오차가 약 2%입니다.
+절대 점수보다는 **크기·단계에 따른 추세**로 읽으세요.
+
+- **HellaSwag** — 상식 기반 문장 완성. 짧은 상황(ActivityNet / WikiHow 출처) 뒤에 이어질 가장
+  그럴듯한 결말을 4개 후보 중 고릅니다. 오답도 자연스럽게 읽히도록 적대적 필터링(adversarial
+  filtering)으로 만들어, 사람은 95% 이상을 맞히지만 작은 모델은 25%(chance) 근처에 머뭅니다.
+- **ARC-Easy** — AI2 Reasoning Challenge의 쉬운 분할. 실제 초·중등 과학 시험 문제로 대부분
+  4지선다입니다. (짝인 ARC-Challenge는 단순 검색 방식이 틀리는 어려운 문제만 모은 쪽이고, Easy는
+  그 나머지입니다.)
+- **KoBEST-HellaSwag** — **KoBEST**(Korean Balanced Evaluation of Significant Tasks, SKT 공개)에
+  포함된 한국어 HellaSwag입니다. 번역이 아니라 한국어 원문으로 된 같은 상식 완성 형식입니다. Base가
+  한국어를 5%만 보기 때문에, Phase 3 이전까지 chance 근처에 머무는 바로 그 태스크입니다.
 
 **2) 학습 (단일 GPU)**
 
@@ -432,6 +469,20 @@ python scripts/train_pretraining.py --config configs/pretraining/base_1b.yaml \
 python scripts/prepare_korean_data.py \
     --output-dir data/korean --tokenizer artifacts/tokenizer --tokens 2e9
 ```
+
+**데이터셋.** Phase 2와 동일한 두 Hugging Face 코퍼스를 한국어 쪽으로 다시 섞습니다. 영어 분량은
+*리플레이(replay)* 로, Base가 이미 익힌 영어 능력이 한국어 적응 과정에서 무너지지 않게 붙잡아 두는
+역할만 합니다.
+
+| 소스 | Hugging Face 데이터셋 | 역할 | 비율 (2B 중) |
+|---|---|---|---|
+| FineWeb2 | [`HuggingFaceFW/fineweb-2`](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2) (`kor_Hang`) | 한국어 적응 | 70% (~1.4B 토큰) |
+| FineWeb-Edu | [`HuggingFaceFW/fineweb-edu`](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) (`default`) | 영어 리플레이 (망각 방지) | 30% (~0.6B 토큰) |
+
+**얼마나 쓰나.** `--tokens 2e9`는 2B 토큰 코퍼스(한국어 1.4B + 영어 0.6B)를 `train_ko/` + `train_en/`
+로 만들고, 이와 별도로 검증 세트(약 한국어 10M / 영어 5M 토큰)를 `ko` / `en`으로 나눠 두어 한국어
+향상과 영어 망각을 따로 추적합니다(아래 "forgetting 측정" 참고). 모든 Base 크기에 같은 레시피가
+적용되며, 모델 차원만 다릅니다.
 
 **2) Base 가중치로 시작해 한국어 학습 (단일 GPU)**
 
