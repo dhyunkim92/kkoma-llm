@@ -21,8 +21,8 @@ and scores, with no per-task logic. Formats follow lm-evaluation-harness so the
 English numbers line up with published ones.
 
 After a task is written its source download is deleted (``--keep-source`` opts
-out). Only the three repos below are touched; other caches, FineWeb included,
-are left alone.
+out). Only the task repos in the registry below are touched; other caches,
+FineWeb included, are left alone.
 
 Usage:
     python scripts/prepare_downstream_data.py --output-dir data/downstream
@@ -103,6 +103,112 @@ def _kobest_hellaswag(row: dict, idx: int) -> Optional[dict]:
     }
 
 
+def _piqa(row: dict, idx: int) -> Optional[dict]:
+    # test ships label -1 (leaderboard-only); only validation has usable gold.
+    if int(row["label"]) not in (0, 1):
+        return None
+    return {
+        "id": str(idx),
+        "label": int(row["label"]),
+        "context": f"Question: {row['goal']}\nAnswer:",
+        "choices": [" " + row["sol1"].strip(), " " + row["sol2"].strip()],
+    }
+
+
+def _boolq(row: dict, idx: int) -> Optional[dict]:
+    # SuperGLUE BoolQ: yes/no reading comprehension. test ships label -1.
+    if int(row["label"]) not in (0, 1):
+        return None
+    return {
+        "id": str(row.get("idx", idx)),
+        "label": int(row["label"]),  # 0 -> no, 1 -> yes
+        "context": f"{row['passage']}\nQuestion: {row['question']}?\nAnswer:",
+        "choices": [" no", " yes"],
+    }
+
+
+def _winogrande(row: dict, idx: int) -> Optional[dict]:
+    # Partial scoring (lm-eval-harness): each option fills the sentence's "_"
+    # blank to form a per-option *context*, and the shared suffix after the
+    # blank is the single continuation scored under each. answer "1"/"2" is the
+    # 1-based gold option; the empty-answer test split is dropped.
+    answer = str(row["answer"])
+    if answer not in ("1", "2"):
+        return None
+    sentence = row["sentence"]
+    if "_" not in sentence:
+        return None
+    cut = sentence.index("_")
+    prefix, suffix = sentence[:cut], sentence[cut + 1 :]
+    if not suffix.strip():
+        return None  # blank at the very end: no continuation to score
+    continuation = " " + suffix.strip()
+    return {
+        "id": str(idx),
+        "label": int(answer) - 1,
+        "contexts": [prefix + row["option1"], prefix + row["option2"]],
+        "choices": [continuation, continuation],
+    }
+
+
+def _openbookqa(row: dict, idx: int) -> Optional[dict]:
+    labels = list(row["choices"]["label"])
+    key = row["answerKey"].strip()
+    if key not in labels:
+        return None
+    return {
+        "id": str(row.get("id", idx)),
+        "label": labels.index(key),
+        "context": row["question_stem"].strip(),
+        "choices": [" " + t.strip() for t in row["choices"]["text"]],
+    }
+
+
+_KOBEST_COPA_CONNECTOR = {"원인": "왜냐하면", "결과": "그래서"}
+
+
+def _kobest_copa(row: dict, idx: int) -> Optional[dict]:
+    # question "원인"(cause)/"결과"(effect) picks the Korean connector; the two
+    # alternatives are the choices (label already 0-based).
+    connector = _KOBEST_COPA_CONNECTOR.get(row["question"].strip(), "")
+    return {
+        "id": str(idx),
+        "label": int(row["label"]),
+        "context": f"{row['premise']} {connector}".rstrip(),
+        "choices": [" " + row["alternative_1"].strip(), " " + row["alternative_2"].strip()],
+    }
+
+
+def _kobest_boolq(row: dict, idx: int) -> Optional[dict]:
+    return {
+        "id": str(idx),
+        "label": int(row["label"]),  # 0 -> 아니오, 1 -> 예
+        "context": f"{row['paragraph']} 질문: {row['question']} 답변:",
+        "choices": [" 아니오", " 예"],
+    }
+
+
+def _kobest_sentineg(row: dict, idx: int) -> Optional[dict]:
+    return {
+        "id": str(idx),
+        "label": int(row["label"]),  # 0 -> 부정, 1 -> 긍정
+        "context": f"문장: {row['sentence']} 긍부정:",
+        "choices": [" 부정", " 긍정"],
+    }
+
+
+def _kobest_wic(row: dict, idx: int) -> Optional[dict]:
+    return {
+        "id": str(idx),
+        "label": int(row["label"]),  # 0 -> 아니오(다른 뜻), 1 -> 예(같은 뜻)
+        "context": (
+            f"문장1: {row['context_1']} 문장2: {row['context_2']} "
+            f"두 문장에서 {row['word']}가 같은 뜻으로 쓰였나?"
+        ),
+        "choices": [" 아니오", " 예"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Task registry
 # ---------------------------------------------------------------------------
@@ -166,13 +272,121 @@ TASKS: list[TaskSpec] = [
         stratified=False,
         prompt_format="'{context}' + ' {ending_N}'",
     ),
+    # ---- English (added for the full post-training evaluation, spec 21.3) ----
+    TaskSpec(
+        name="piqa",
+        revision="142f6d7367fd9877f0fb3b5734ea6a545f54cdd1",
+        repo="baber/piqa",  # parquet mirror the harness loads (no remote code)
+        subset=None,
+        split="validation",  # test ships label -1
+        language="en",
+        to_record=_piqa,
+        n_sample=500,
+        stratified=False,
+        prompt_format="lm-eval-harness: 'Question: {goal}\\nAnswer:' + ' {sol}'",
+    ),
+    TaskSpec(
+        name="arc_challenge",
+        revision="210d026faf9955653af8916fad021475a3f00453",
+        repo="allenai/ai2_arc",
+        subset="ARC-Challenge",
+        split="test",
+        language="en",
+        to_record=_arc_easy,  # identical schema to ARC-Easy
+        n_sample=500,
+        stratified=False,
+        prompt_format="lm-eval-harness: 'Question: {question}\\nAnswer:' + ' {choice}'",
+    ),
+    TaskSpec(
+        name="boolq",
+        revision="3de24cf8022e94f4ee4b9d55a6f539891524d646",
+        repo="aps/super_glue",
+        subset="boolq",
+        split="validation",  # test ships label -1
+        language="en",
+        to_record=_boolq,
+        n_sample=500,
+        stratified=False,
+        prompt_format="lm-eval-harness: '{passage}\\nQuestion: {question}?\\nAnswer:' + ' {no|yes}'",
+    ),
+    TaskSpec(
+        name="winogrande",
+        revision="01e74176c63542e6b0bcb004dcdea22d94fb67b5",
+        repo="allenai/winogrande",
+        subset="winogrande_xl",
+        split="validation",  # test ships an empty answer
+        language="en",
+        to_record=_winogrande,
+        n_sample=500,
+        stratified=False,
+        prompt_format="lm-eval-harness partial: score '{suffix}' under '{prefix}{option_i}'",
+    ),
+    TaskSpec(
+        name="openbookqa",
+        revision="388097ea7776314e93a529163e0fea805b8a6454",
+        repo="allenai/openbookqa",
+        subset="main",
+        split="test",
+        language="en",
+        to_record=_openbookqa,
+        n_sample=500,  # the test split is exactly 500; taken whole
+        stratified=False,
+        prompt_format="lm-eval-harness: '{question_stem}' + ' {choice}'",
+    ),
+    # ---- Korean KoBEST suite (skt/kobest_v1) --------------------------------
+    TaskSpec(
+        name="kobest_copa",
+        revision="a5ea15e3ac77ed694b79f6204eb31889a2ba989f",
+        repo="skt/kobest_v1",
+        subset="copa",
+        split="test",
+        language="ko",
+        to_record=_kobest_copa,
+        n_sample=500,
+        stratified=False,
+        prompt_format="'{premise} {왜냐하면|그래서}' + ' {alternative}'",
+    ),
+    TaskSpec(
+        name="kobest_boolq",
+        revision="a5ea15e3ac77ed694b79f6204eb31889a2ba989f",
+        repo="skt/kobest_v1",
+        subset="boolq",
+        split="test",
+        language="ko",
+        to_record=_kobest_boolq,
+        n_sample=500,
+        stratified=False,
+        prompt_format="'{paragraph} 질문: {question} 답변:' + ' {아니오|예}'",
+    ),
+    TaskSpec(
+        name="kobest_sentineg",
+        revision="a5ea15e3ac77ed694b79f6204eb31889a2ba989f",
+        repo="skt/kobest_v1",
+        subset="sentineg",
+        split="test",
+        language="ko",
+        to_record=_kobest_sentineg,
+        n_sample=None,  # the test split is 397; take it whole
+        stratified=False,
+        prompt_format="'문장: {sentence} 긍부정:' + ' {부정|긍정}'",
+    ),
+    TaskSpec(
+        name="kobest_wic",
+        revision="a5ea15e3ac77ed694b79f6204eb31889a2ba989f",
+        repo="skt/kobest_v1",
+        subset="wic",
+        split="test",
+        language="ko",
+        to_record=_kobest_wic,
+        n_sample=500,
+        stratified=False,
+        prompt_format="'문장1: {c1} 문장2: {c2} 두 문장에서 {word}가 같은 뜻으로 쓰였나?' + ' {아니오|예}'",
+    ),
 ]
 
-# Not wired up yet, but the registry above is the only thing PIQA, WinoGrande or
-# LAMBADA would need: a formatter returning the same record shape, plus an entry
-# in evaluation.downstream_tasks. LAMBADA is the exception, being last-token
-# accuracy rather than multiple choice (kkoma.evaluation.downstream has a
-# separate scorer for it).
+# LAMBADA would be the next addition: a formatter plus an entry in
+# evaluation.downstream_tasks. It is the exception to the multiple-choice shape,
+# being last-token accuracy (kkoma.evaluation.downstream has a separate scorer).
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +507,15 @@ def _write_manifest(out_dir: str, seed: int, entries: list[dict], purged: list[s
 def build_task(spec: TaskSpec, out_dir: str, seed: int) -> dict:
     from datasets import load_dataset
 
-    ds = load_dataset(spec.repo, spec.subset, split=spec.split, revision=spec.revision)
+    # Some sources (e.g. winogrande, super_glue) load via a dataset script and
+    # need trust_remote_code on newer `datasets`; older versions lack the arg.
+    try:
+        ds = load_dataset(
+            spec.repo, spec.subset, split=spec.split,
+            revision=spec.revision, trust_remote_code=True,
+        )
+    except TypeError:
+        ds = load_dataset(spec.repo, spec.subset, split=spec.split, revision=spec.revision)
     source_size = len(ds)
 
     records, dropped = [], 0

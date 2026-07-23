@@ -76,18 +76,54 @@ evaluation:
   downstream_enabled: true
   downstream_batch_size: 16
   downstream_tasks:
+  # Scored during training (light 3-task set) and again in the final evaluation.
   - name: hellaswag
     path: data/downstream/hellaswag.jsonl
     language: en
-    enabled: true
   - name: arc_easy
     path: data/downstream/arc_easy.jsonl
     language: en
-    enabled: true
   - name: kobest_hellaswag
     path: data/downstream/kobest_hellaswag.jsonl
     language: ko
-    enabled: true
+  # Final evaluation only (scripts/evaluate.py). during_training: false keeps the
+  # in-training benchmark cadence light; the post-training run scores them all.
+  - name: piqa
+    path: data/downstream/piqa.jsonl
+    language: en
+    during_training: false
+  - name: arc_challenge
+    path: data/downstream/arc_challenge.jsonl
+    language: en
+    during_training: false
+  - name: boolq
+    path: data/downstream/boolq.jsonl
+    language: en
+    during_training: false
+  - name: winogrande
+    path: data/downstream/winogrande.jsonl
+    language: en
+    during_training: false
+  - name: openbookqa
+    path: data/downstream/openbookqa.jsonl
+    language: en
+    during_training: false
+  - name: kobest_copa
+    path: data/downstream/kobest_copa.jsonl
+    language: ko
+    during_training: false
+  - name: kobest_boolq
+    path: data/downstream/kobest_boolq.jsonl
+    language: ko
+    during_training: false
+  - name: kobest_sentineg
+    path: data/downstream/kobest_sentineg.jsonl
+    language: ko
+    during_training: false
+  - name: kobest_wic
+    path: data/downstream/kobest_wic.jsonl
+    language: ko
+    during_training: false
 
 logging:
   backend: wandb

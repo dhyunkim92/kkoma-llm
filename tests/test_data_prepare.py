@@ -84,3 +84,96 @@ def test_manifest_records_split_method(tmp_path):
     assert manifest["holdout"]["holdout_mod"] == 10
     assert "sha256" in manifest["holdout"]["method"]
     assert manifest["shuffle"] == {"seed": 7, "buffer_size": 32}
+
+
+# ---------------------------------------------------------------------------
+# Downstream task formatters (scripts/prepare_downstream_data.py). Each maps a
+# raw dataset row to the frozen record shape; the choice delimiter is a leading
+# space and the gold index is 0-based.
+# ---------------------------------------------------------------------------
+
+from scripts.prepare_downstream_data import (  # noqa: E402
+    _boolq,
+    _kobest_boolq,
+    _kobest_copa,
+    _kobest_sentineg,
+    _kobest_wic,
+    _openbookqa,
+    _piqa,
+    _winogrande,
+)
+
+
+def test_piqa_formats_two_choice_record():
+    rec = _piqa({"goal": "How to open a jar?", "sol1": "twist lid", "sol2": "smash it", "label": 1}, 0)
+    assert rec["context"] == "Question: How to open a jar?\nAnswer:"
+    assert rec["choices"] == [" twist lid", " smash it"]
+    assert rec["label"] == 1
+
+
+def test_piqa_drops_unlabeled_test_rows():
+    assert _piqa({"goal": "g", "sol1": "a", "sol2": "b", "label": -1}, 0) is None
+
+
+def test_boolq_maps_label_to_no_yes():
+    rec = _boolq({"passage": "Cats are mammals.", "question": "is a cat a mammal", "label": 1}, 3)
+    assert rec["choices"] == [" no", " yes"]  # index 1 == yes == gold
+    assert rec["context"].endswith("Answer:")
+    assert rec["label"] == 1
+
+
+def test_winogrande_partial_uses_per_option_context():
+    row = {
+        "sentence": "The trophy did not fit in the case because _ was too big.",
+        "option1": "the trophy",
+        "option2": "the case",
+        "answer": "1",
+    }
+    rec = _winogrande(row, 0)
+    prefix = "The trophy did not fit in the case because "
+    assert rec["contexts"] == [prefix + "the trophy", prefix + "the case"]
+    # Shared continuation (the suffix after the blank), identical for both options.
+    assert rec["choices"] == [" was too big.", " was too big."]
+    assert rec["label"] == 0  # answer "1" -> index 0
+
+
+def test_winogrande_drops_empty_answer():
+    row = {"sentence": "A _ B.", "option1": "x", "option2": "y", "answer": ""}
+    assert _winogrande(row, 0) is None
+
+
+def test_openbookqa_indexes_answer_key():
+    row = {
+        "id": "q1",
+        "question_stem": "The sun is a",
+        "choices": {"text": ["planet", "star", "moon", "comet"], "label": ["A", "B", "C", "D"]},
+        "answerKey": "B",
+    }
+    rec = _openbookqa(row, 0)
+    assert rec["context"] == "The sun is a"
+    assert rec["choices"] == [" planet", " star", " moon", " comet"]
+    assert rec["label"] == 1
+
+
+def test_kobest_copa_selects_connector():
+    cause = _kobest_copa(
+        {"premise": "그는 넘어졌다.", "question": "원인", "alternative_1": "돌", "alternative_2": "물", "label": 0}, 0
+    )
+    assert "왜냐하면" in cause["context"]
+    effect = _kobest_copa(
+        {"premise": "그는 넘어졌다.", "question": "결과", "alternative_1": "돌", "alternative_2": "물", "label": 1}, 0
+    )
+    assert "그래서" in effect["context"]
+    assert cause["choices"] == [" 돌", " 물"]
+
+
+def test_kobest_boolq_and_sentineg_and_wic_choices():
+    b = _kobest_boolq({"paragraph": "고양이는 포유류다.", "question": "고양이는 동물인가?", "label": 1}, 0)
+    assert b["choices"] == [" 아니오", " 예"] and b["label"] == 1
+    s = _kobest_sentineg({"sentence": "정말 최고의 영화였다.", "label": 1}, 0)
+    assert s["choices"] == [" 부정", " 긍정"] and s["context"].startswith("문장:")
+    w = _kobest_wic(
+        {"word": "배", "context_1": "사과와 배를 먹었다.", "context_2": "배가 아프다.", "label": 0}, 0
+    )
+    assert w["choices"] == [" 아니오", " 예"]
+    assert "배가 같은 뜻으로 쓰였나?" in w["context"]

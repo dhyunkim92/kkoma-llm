@@ -1,7 +1,8 @@
 """Zero/few-shot downstream evaluation primitives (spec section 21.3).
 
 Provides likelihood-based scoring used by multiple-choice benchmarks
-(HellaSwag, PIQA, ARC-Easy, WinoGrande) and a LAMBADA-style last-token
+(HellaSwag, PIQA, ARC, BoolQ, OpenBookQA, the KoBEST suite, and the
+per-choice-context WinoGrande variant) plus a LAMBADA-style last-token
 accuracy. Dataset loading lives in scripts; here we keep the scoring core so
 the tokenizer and prompt format stay fixed.
 
@@ -54,6 +55,11 @@ class MultipleChoiceExample:
     context: str
     choices: list[str]
     label: int
+    # Per-choice context, used only by WinoGrande-style tasks where each option
+    # fills a blank and the *continuation* (the shared sentence suffix) is scored
+    # under a different prefix per option. When None the single ``context`` is
+    # shared across all choices, which is the ordinary multiple-choice case.
+    contexts: list[str] | None = None
 
 
 @torch.no_grad()
@@ -69,9 +75,10 @@ def evaluate_multiple_choice(
     model.eval()
     correct = 0
     for ex in examples:
+        contexts = ex.contexts if ex.contexts is not None else [ex.context] * len(ex.choices)
         scores = []
-        for choice in ex.choices:
-            lp, n = continuation_logprob(model, tokenizer, ex.context, choice, device)
+        for ctx, choice in zip(contexts, ex.choices):
+            lp, n = continuation_logprob(model, tokenizer, ctx, choice, device)
             scores.append(lp / n if (length_normalized and n) else lp)
         pred = int(torch.tensor(scores).argmax().item())
         correct += int(pred == ex.label)
@@ -95,9 +102,10 @@ def load_examples(path: str) -> list[MultipleChoiceExample]:
             row = json.loads(line)
             out.append(
                 MultipleChoiceExample(
-                    context=row["context"],
+                    context=row.get("context", ""),
                     choices=list(row["choices"]),
                     label=int(row["label"]),
+                    contexts=row.get("contexts"),
                 )
             )
     return out
@@ -123,12 +131,18 @@ def score_choices(
     every RoPE position and corrupt the scores silently.
     """
 
-    # Flatten to pairs, remembering where each one belongs.
+    # Flatten to pairs, remembering where each one belongs. WinoGrande-style
+    # tasks carry a per-choice context (``ex.contexts``); ordinary tasks share
+    # one context, encoded once and reused across the choices.
     flat: list[tuple[int, int, list[int], list[int]]] = []
     for ei, ex in enumerate(examples):
-        ctx_ids = tokenizer.encode(ex.context, add_bos=True)
+        if ex.contexts is not None:
+            ctx_ids_per_choice = [tokenizer.encode(c, add_bos=True) for c in ex.contexts]
+        else:
+            shared = tokenizer.encode(ex.context, add_bos=True)
+            ctx_ids_per_choice = [shared] * len(ex.choices)
         for ci, choice in enumerate(ex.choices):
-            flat.append((ei, ci, ctx_ids, tokenizer.encode(choice)))
+            flat.append((ei, ci, ctx_ids_per_choice[ci], tokenizer.encode(choice)))
 
     scores: list[list[float]] = [[float("-inf")] * len(ex.choices) for ex in examples]
     # Group similar lengths together so padding waste (and the peak logits
@@ -223,6 +237,45 @@ def evaluate_task(
 
 
 @torch.no_grad()
+def evaluate_downstream_suite(
+    model: KkomaModel,
+    tokenizer: KkomaTokenizer,
+    tasks: list[tuple[str, str, list[MultipleChoiceExample]]],
+    device: torch.device,
+    batch_size: int = 16,
+    reduce_fn=None,
+) -> dict:
+    """Score a list of ``(name, language, examples)`` tasks in one pass.
+
+    Returns per-task ``acc_norm``/margins plus ``en_avg`` / ``ko_avg`` /
+    ``overall_avg`` language aggregates — the shape the post-training evaluation
+    (scripts/evaluate.py) writes out. The trainer keeps its own DDP-sharded loop
+    because it also streams each task to W&B as it goes.
+    """
+
+    per_task: dict = {}
+    by_lang: dict[str, list[float]] = {}
+    for name, language, examples in tasks:
+        r = evaluate_task(
+            model, tokenizer, examples, device,
+            batch_size=batch_size, reduce_fn=reduce_fn,
+        )
+        per_task[name] = {"language": language, **r}
+        by_lang.setdefault(language, []).append(r["acc_norm"])
+
+    def _mean(xs: list[float]) -> float:
+        return sum(xs) / len(xs) if xs else float("nan")
+
+    aggregates: dict = {}
+    if "en" in by_lang:
+        aggregates["en_avg"] = _mean(by_lang["en"])
+    if "ko" in by_lang:
+        aggregates["ko_avg"] = _mean(by_lang["ko"])
+    aggregates["overall_avg"] = _mean([a for accs in by_lang.values() for a in accs])
+    return {"tasks": per_task, "aggregates": aggregates}
+
+
+@torch.no_grad()
 def evaluate_lambada(
     model: KkomaModel,
     tokenizer: KkomaTokenizer,
@@ -255,6 +308,7 @@ __all__ = [
     "continuation_logprob",
     "evaluate_multiple_choice",
     "evaluate_task",
+    "evaluate_downstream_suite",
     "evaluate_lambada",
     "load_examples",
     "score_choices",

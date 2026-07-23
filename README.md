@@ -385,38 +385,54 @@ Each model then reads only the leading part of that single corpus, set by its co
 
 **1′) Prepare downstream benchmark sets (optional)**
 
-Only needed if you want HellaSwag / ARC-Easy / KoBEST-HellaSwag scored during training (see §7).
-Training runs fine without it and simply skips them.
+Needed if you want benchmarks scored — a light 3-task set **during training** (see §7) and the full
+12-task suite in the **post-training evaluation** (`scripts/evaluate.py`, §7). Training and the final
+eval both run fine without them and simply skip.
 
 ```bash
 python scripts/prepare_downstream_data.py --output-dir data/downstream
 ```
 
-This samples 500 questions per task and freezes them to JSONL, then deletes the source downloads.
-The sampling is fixed by `--seed` (default 42) and the pinned dataset revisions, so rebuilding
-yields the identical questions and every model sees the same test.
+This samples up to 500 questions per task and freezes them to JSONL, then deletes the source
+downloads. The sampling is fixed by `--seed` (default 42) and the pinned dataset revisions, so
+rebuilding yields the identical questions and every model sees the same test. Build a subset with
+`--tasks hellaswag piqa …`.
 
-| Task | Hugging Face source | Language | Sampling |
-|---|---|---|---|
-| HellaSwag | [`Rowan/hellaswag`](https://huggingface.co/datasets/Rowan/hellaswag) (`validation`) | English | 500, stratified 125 per gold label |
-| ARC-Easy | [`allenai/ai2_arc`](https://huggingface.co/datasets/allenai/ai2_arc) (`ARC-Easy`, `test`) | English | 500, random, original choice sets kept |
-| KoBEST-HellaSwag | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`hellaswag`, `test`) | Korean | all 500 |
+| Task | Hugging Face source | Lang | Scored | Questions |
+|---|---|---|---|---|
+| HellaSwag | [`Rowan/hellaswag`](https://huggingface.co/datasets/Rowan/hellaswag) (`validation`) | en | training + final | 500 (stratified) |
+| ARC-Easy | [`allenai/ai2_arc`](https://huggingface.co/datasets/allenai/ai2_arc) (`ARC-Easy`, `test`) | en | training + final | 500 |
+| KoBEST-HellaSwag | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`hellaswag`, `test`) | ko | training + final | 500 |
+| PIQA | [`baber/piqa`](https://huggingface.co/datasets/baber/piqa) (`validation`) | en | final | 500 |
+| ARC-Challenge | [`allenai/ai2_arc`](https://huggingface.co/datasets/allenai/ai2_arc) (`ARC-Challenge`, `test`) | en | final | 500 |
+| BoolQ | [`aps/super_glue`](https://huggingface.co/datasets/aps/super_glue) (`boolq`, `validation`) | en | final | 500 |
+| WinoGrande | [`allenai/winogrande`](https://huggingface.co/datasets/allenai/winogrande) (`winogrande_xl`, `validation`) | en | final | 500 |
+| OpenBookQA | [`allenai/openbookqa`](https://huggingface.co/datasets/allenai/openbookqa) (`main`, `test`) | en | final | 500 |
+| KoBEST-COPA | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`copa`, `test`) | ko | final | 500 |
+| KoBEST-BoolQ | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`boolq`, `test`) | ko | final | 500 |
+| KoBEST-SentiNeg | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`sentineg`, `test`) | ko | final | 397 (whole) |
+| KoBEST-WiC | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`wic`, `test`) | ko | final | 500 |
 
-All three are **multiple-choice** tasks scored by length-normalized accuracy (`acc_norm`): the model
+Every task is **multiple-choice**, scored by length-normalized accuracy (`acc_norm`): the model
 assigns a likelihood to each candidate continuation and the highest-scoring one is its answer — no
-task-specific head, no fine-tuning. Question counts are capped at 500, so the standard error near
-chance is ~2%: read them as a trend across sizes and stages, not as headline scores.
+task-specific head, no fine-tuning. Question counts are capped near 500, so the standard error close
+to chance is ~2%: read them as a trend across sizes and stages, not as headline scores. The
+`Scored` column reflects each config's `during_training` flag — the three light tasks run on the
+in-training cadence, and `scripts/evaluate.py` scores all twelve once at the end.
 
-- **HellaSwag** — commonsense sentence completion. Given a short situation (from ActivityNet /
-  WikiHow), pick the most plausible of four endings. Built by adversarial filtering so wrong endings
-  read fluently; humans score >95% while small models hover near the 25% chance line.
-- **ARC-Easy** — the easy split of the AI2 Reasoning Challenge: real grade-school science exam
-  questions, mostly 4-way multiple choice. (The sibling ARC-Challenge holds the questions that simple
-  retrieval methods get wrong; Easy is the rest.)
-- **KoBEST-HellaSwag** — the Korean-language HellaSwag from **KoBEST** (Korean Balanced Evaluation of
-  Significant Tasks, released by SKT). Same commonsense-completion format, in native Korean rather
-  than translation. Because the Base sees only 5% Korean, this is the task that stays near chance
-  until Phase 3 moves it.
+- **Commonsense** — HellaSwag & PIQA (physical), WinoGrande (pronoun coreference), plus the Korean
+  KoBEST-HellaSwag and KoBEST-COPA (cause/effect). Adversarially filtered so wrong options read
+  fluently; small models start near chance.
+- **Science / knowledge QA** — ARC-Easy and the harder ARC-Challenge (grade-school science exams),
+  and OpenBookQA (elementary science with a supporting fact).
+- **Reading comprehension** — BoolQ and KoBEST-BoolQ: yes/no questions over a passage.
+- **Korean-specific** — KoBEST-SentiNeg (sentiment polarity) and KoBEST-WiC (does a word carry the
+  same sense in two contexts). Because the Base sees only 5% Korean, the KoBEST tasks stay near
+  chance until Phase 3 moves them.
+
+WinoGrande scores differently under the hood: each option fills the sentence's `_` blank, and the
+shared suffix after the blank is scored under each filled-in prefix (the lm-evaluation-harness
+partial scheme) rather than one shared context — so its records carry a per-choice `contexts` field.
 
 **2) Train (single GPU)**
 
@@ -539,8 +555,12 @@ ran it for the Base. If they are missing, CPT logs a warning and skips them rath
 
 ## 7. Evaluation and generation
 
-**Evaluate a checkpoint**: LM loss (EN/KO split), an efficiency benchmark, and fixed-prompt
-generation samples, saved as JSON.
+Two entry points, kept separate: **`evaluate.py`** measures a trained checkpoint (loss, benchmarks,
+speed, sample text) into one JSON, and **`sample.py`** generates freely from a prompt you give it.
+
+### 7.1 Checkpoint evaluation — `scripts/evaluate.py`
+
+The post-training run. Point it at a checkpoint and it writes one JSON with up to four sections.
 
 ```bash
 python scripts/evaluate.py \
@@ -549,26 +569,51 @@ python scripts/evaluate.py \
     --output artifacts/evaluation/base_1b.json
 ```
 
+| JSON section | What it holds |
+|---|---|
+| `language_modeling` | validation loss + perplexity, split EN / KO |
+| `downstream` | benchmark accuracies (§7.2) |
+| `efficiency` | throughput, latency, peak memory, FLOPs estimate |
+| `generation` | **fixed**-prompt sample text, for eyeballing quality |
+
 | Option | Default | Description |
 |---|---|---|
-| `--max-batches` | `50` | number of validation batches |
-| `--no-generation` | (off) | skip the generation-sample step |
+| `--max-batches` | `50` | validation batches for the `language_modeling` section |
+| `--no-downstream` | (off) | skip the `downstream` section |
+| `--no-generation` | (off) | skip the `generation` section |
 
-**Downstream benchmarks during training**: if you prepared the frozen sets (Phase 2 step 1′,
-optional), three zero-shot multiple-choice sets (HellaSwag, ARC-Easy, KoBEST-HellaSwag) are scored
-on a separate cadence (`downstream_interval`, default every 1,000 steps, plus a step-0 baseline),
-alongside the validation-loss curve.
+The `generation` section uses a **fixed** prompt set (same seed across every checkpoint, so quality
+is compared apples-to-apples): EN `"The meaning of life is"`, `"Artificial intelligence can"`,
+`"In the future, small language models"`; KO `"인공지능이란"`, `"대한민국의 수도는"`,
+`"작은 언어 모델을 직접 학습하면"`. To generate from your *own* prompt, use `sample.py` (§7.3).
 
-Scoring is length-normalized continuation log-likelihood (`acc_norm`). Each task also logs a
-`margin_max` and `margin_mean` (gold minus the strongest / average distractor): near chance the
-accuracy barely moves while the margins still do, so they show the model is learning before any
-answer flips. Aggregates are `downstream/en_avg`, `downstream/ko_avg`, and `downstream/overall_avg`.
-At this scale (tpp ~10) HellaSwag stays near chance (25%) for a long time, and KoBEST barely moves
-until Phase 3, so these are for watching the trend, not the absolute score. A 500-question set is
-too noisy to select on, so **best-checkpoint selection stays on validation loss**. Turn the whole
-thing off with `downstream_enabled: false`, or drop a single task with its `enabled: false`.
+### 7.2 Downstream benchmarks
 
-**Generate text**: KV-cache autoregressive generation. The same seed reproduces the same output.
+The frozen multiple-choice suite (Phase 2 step 1′ builds the sets), scored by length-normalized
+continuation log-likelihood (`acc_norm`) — no task-specific head, no fine-tuning. It runs in two
+distinct places:
+
+| | Tasks | When | Where |
+|---|---|---|---|
+| **Final** | all 12 enabled | once, post-training | `evaluate.py` (§7.1) |
+| **During training** | the 3 light `during_training` tasks | every `downstream_interval` (default 1,000 steps) + a step-0 baseline | the training loop |
+
+Keeping training to three tasks (HellaSwag, ARC-Easy, KoBEST-HellaSwag) holds the loop fast; the
+final run scores everything. The `evaluate.py` output records `downstream.tasks[name]` (`acc_norm`,
+`margin_max`, `margin_mean`, `n`) and `downstream.aggregates` (`en_avg` / `ko_avg` / `overall_avg`).
+
+`margin_max` / `margin_mean` (gold minus the strongest / average distractor) move before the
+accuracy flips — useful near chance, where a ~500-question set is noisy (~2% SE). At this scale
+(tpp ~10) HellaSwag sits near 25% for a long time and KoBEST barely moves until Phase 3, so read the
+trend, not the absolute score. **Best-checkpoint selection stays on validation loss**, never these.
+
+Toggles: `downstream_enabled: false` (all off) · a task's `enabled: false` (drop one) ·
+`during_training: false` (final-only).
+
+### 7.3 Text generation — `scripts/sample.py`
+
+Free-form autoregressive generation (KV-cache) from **your own** prompt. The same seed reproduces
+the same output.
 
 ```bash
 python scripts/sample.py \
@@ -584,11 +629,6 @@ python scripts/sample.py \
 | `--temperature` | `0.8` | 0 means greedy |
 | `--top-k` / `--top-p` | `50` / `1.0` | sampling filters |
 | `--seed` | `1234` | seed for reproducibility |
-
-**Fixed evaluation prompts** (compared across all checkpoints with the same seed):
-English `"The meaning of life is"`, `"Artificial intelligence can"`,
-`"In the future, small language models"` / Korean `"인공지능이란"`, `"대한민국의 수도는"`,
-`"작은 언어 모델을 직접 학습하면"`.
 
 ---
 

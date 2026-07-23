@@ -370,37 +370,50 @@ FineWeb2 전체가 아니라 약 0.58B 토큰만)와, 이와 겹치지 않는 �
 
 **1′) downstream 벤치마크 세트 준비 (선택)**
 
-학습 중 HellaSwag / ARC-Easy / KoBEST-HellaSwag를 채점하고 싶을 때만 필요합니다(§7 참고). 없어도
-학습은 정상 동작하며 해당 평가만 건너뜁니다.
+벤치마크를 채점하려면 필요합니다 — **학습 중**에는 가벼운 3개 세트(§7 참고), **학습 종료 후**
+`scripts/evaluate.py`에서는 12개 전체를 채점합니다. 없어도 학습·최종 평가 모두 정상 동작하며 해당
+평가만 건너뜁니다.
 
 ```bash
 python scripts/prepare_downstream_data.py --output-dir data/downstream
 ```
 
-태스크별 500문항을 뽑아 JSONL로 고정한 뒤 원본 다운로드는 삭제합니다. 샘플링은 `--seed`(기본 42)와
-고정된 데이터셋 revision으로 결정되므로, 다시 만들어도 같은 문항이 나오고 모든 모델이 동일한 세트를
-봅니다.
+태스크별 최대 500문항을 뽑아 JSONL로 고정한 뒤 원본 다운로드는 삭제합니다. 샘플링은 `--seed`(기본
+42)와 고정된 데이터셋 revision으로 결정되므로, 다시 만들어도 같은 문항이 나오고 모든 모델이 동일한
+세트를 봅니다. `--tasks hellaswag piqa …`로 일부만 만들 수도 있습니다.
 
-| 태스크 | Hugging Face 소스 | 언어 | 샘플링 |
-|---|---|---|---|
-| HellaSwag | [`Rowan/hellaswag`](https://huggingface.co/datasets/Rowan/hellaswag) (`validation`) | 영어 | 500, 정답 label별 125 stratified |
-| ARC-Easy | [`allenai/ai2_arc`](https://huggingface.co/datasets/allenai/ai2_arc) (`ARC-Easy`, `test`) | 영어 | 500, 무작위, 원본 선택지 유지 |
-| KoBEST-HellaSwag | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`hellaswag`, `test`) | 한국어 | 500 전체 |
+| 태스크 | Hugging Face 소스 | 언어 | 채점 시점 | 문항 |
+|---|---|---|---|---|
+| HellaSwag | [`Rowan/hellaswag`](https://huggingface.co/datasets/Rowan/hellaswag) (`validation`) | 영어 | 학습 중 + 최종 | 500 (stratified) |
+| ARC-Easy | [`allenai/ai2_arc`](https://huggingface.co/datasets/allenai/ai2_arc) (`ARC-Easy`, `test`) | 영어 | 학습 중 + 최종 | 500 |
+| KoBEST-HellaSwag | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`hellaswag`, `test`) | 한국어 | 학습 중 + 최종 | 500 |
+| PIQA | [`baber/piqa`](https://huggingface.co/datasets/baber/piqa) (`validation`) | 영어 | 최종 | 500 |
+| ARC-Challenge | [`allenai/ai2_arc`](https://huggingface.co/datasets/allenai/ai2_arc) (`ARC-Challenge`, `test`) | 영어 | 최종 | 500 |
+| BoolQ | [`aps/super_glue`](https://huggingface.co/datasets/aps/super_glue) (`boolq`, `validation`) | 영어 | 최종 | 500 |
+| WinoGrande | [`allenai/winogrande`](https://huggingface.co/datasets/allenai/winogrande) (`winogrande_xl`, `validation`) | 영어 | 최종 | 500 |
+| OpenBookQA | [`allenai/openbookqa`](https://huggingface.co/datasets/allenai/openbookqa) (`main`, `test`) | 영어 | 최종 | 500 |
+| KoBEST-COPA | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`copa`, `test`) | 한국어 | 최종 | 500 |
+| KoBEST-BoolQ | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`boolq`, `test`) | 한국어 | 최종 | 500 |
+| KoBEST-SentiNeg | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`sentineg`, `test`) | 한국어 | 최종 | 397 (전체) |
+| KoBEST-WiC | [`skt/kobest_v1`](https://huggingface.co/datasets/skt/kobest_v1) (`wic`, `test`) | 한국어 | 최종 | 500 |
 
-세 태스크 모두 **다지선다(multiple-choice)** 문제로, 길이 정규화 정확도(`acc_norm`)로 채점합니다.
-모델이 각 후보 이어짐에 확률을 매기고 가장 높은 것을 답으로 고르는 방식이라 태스크 전용 헤드나
-파인튜닝이 필요 없습니다. 문항 수를 500으로 제한했기 때문에 chance 근처에서 표준오차가 약 2%입니다.
-절대 점수보다는 **크기·단계에 따른 추세**로 읽으세요.
+모든 태스크는 **다지선다(multiple-choice)** 문제로, 길이 정규화 정확도(`acc_norm`)로 채점합니다.
+각 후보 이어짐에 확률을 매기고 가장 높은 것을 답으로 고르는 방식이라 태스크 전용 헤드나 파인튜닝이
+필요 없습니다. 문항 수를 약 500으로 제한해 chance 근처 표준오차가 약 2%이니, 절대 점수보다 **크기·
+단계에 따른 추세**로 읽으세요. `채점 시점` 열은 각 config의 `during_training` 플래그를 반영합니다 —
+가벼운 3개만 학습 중 주기로 돌고, `scripts/evaluate.py`가 끝에 12개 전부를 한 번 채점합니다.
 
-- **HellaSwag** — 상식 기반 문장 완성. 짧은 상황(ActivityNet / WikiHow 출처) 뒤에 이어질 가장
-  그럴듯한 결말을 4개 후보 중 고릅니다. 오답도 자연스럽게 읽히도록 적대적 필터링(adversarial
-  filtering)으로 만들어, 사람은 95% 이상을 맞히지만 작은 모델은 25%(chance) 근처에 머뭅니다.
-- **ARC-Easy** — AI2 Reasoning Challenge의 쉬운 분할. 실제 초·중등 과학 시험 문제로 대부분
-  4지선다입니다. (짝인 ARC-Challenge는 단순 검색 방식이 틀리는 어려운 문제만 모은 쪽이고, Easy는
-  그 나머지입니다.)
-- **KoBEST-HellaSwag** — **KoBEST**(Korean Balanced Evaluation of Significant Tasks, SKT 공개)에
-  포함된 한국어 HellaSwag입니다. 번역이 아니라 한국어 원문으로 된 같은 상식 완성 형식입니다. Base가
-  한국어를 5%만 보기 때문에, Phase 3 이전까지 chance 근처에 머무는 바로 그 태스크입니다.
+- **상식(commonsense)** — HellaSwag·PIQA(물리 상식)·WinoGrande(대명사 지시), 한국어 KoBEST-HellaSwag·
+  KoBEST-COPA(원인/결과). 오답도 자연스럽게 읽히도록 적대적 필터링돼 작은 모델은 chance 근처에서 시작.
+- **과학·지식 QA** — ARC-Easy와 더 어려운 ARC-Challenge(초·중등 과학 시험), OpenBookQA(핵심 사실을
+  곁들인 초등 과학).
+- **독해(reading comprehension)** — BoolQ와 KoBEST-BoolQ: 지문에 대한 yes/no 질문.
+- **한국어 특화** — KoBEST-SentiNeg(감성 긍/부정), KoBEST-WiC(두 문맥에서 한 단어가 같은 뜻인지). Base가
+  한국어를 5%만 보기 때문에 KoBEST 태스크들은 Phase 3 이전까지 chance 근처에 머뭅니다.
+
+WinoGrande만 채점 방식이 다릅니다: 각 옵션이 문장의 `_` 빈칸을 채우고, 빈칸 뒤 공통 접미사를 옵션별
+prefix에 조건부로 채점합니다(lm-evaluation-harness partial 방식). 그래서 이 레코드만 옵션별 `contexts`
+필드를 가집니다.
 
 **2) 학습 (단일 GPU)**
 
@@ -519,7 +532,12 @@ torchrun --nproc_per_node=8 scripts/train_continued.py \
 
 ## 7. 평가와 생성
 
-**체크포인트 평가**: LM loss(EN/KO 분리), 효율 벤치마크, 고정 프롬프트 생성 샘플을 JSON으로 저장.
+진입점은 둘이며 역할이 분리됩니다: **`evaluate.py`** 는 학습된 체크포인트를 측정해(loss·벤치마크·
+속도·샘플 텍스트) 하나의 JSON으로 저장하고, **`sample.py`** 는 직접 준 프롬프트로 자유롭게 생성합니다.
+
+### 7.1 체크포인트 평가 — `scripts/evaluate.py`
+
+학습 종료 후 실행합니다. 체크포인트를 지정하면 최대 네 개 섹션을 담은 JSON 하나를 씁니다.
 
 ```bash
 python scripts/evaluate.py \
@@ -528,25 +546,49 @@ python scripts/evaluate.py \
     --output artifacts/evaluation/base_1b.json
 ```
 
+| JSON 섹션 | 내용 |
+|---|---|
+| `language_modeling` | 검증 loss + perplexity, EN / KO 분리 |
+| `downstream` | 벤치마크 정확도 (§7.2) |
+| `efficiency` | 처리량, 지연, 최대 메모리, FLOPs 추정 |
+| `generation` | **고정** 프롬프트 샘플 텍스트 (품질 눈으로 확인용) |
+
 | 옵션 | 기본값 | 설명 |
 |---|---|---|
-| `--max-batches` | `50` | 검증에 사용할 배치 수 |
-| `--no-generation` | (꺼짐) | 생성 샘플 단계 건너뛰기 |
+| `--max-batches` | `50` | `language_modeling` 섹션의 검증 배치 수 |
+| `--no-downstream` | (꺼짐) | `downstream` 섹션 건너뛰기 |
+| `--no-generation` | (꺼짐) | `generation` 섹션 건너뛰기 |
 
-**학습 중 downstream 벤치마크**: 고정 세트를 준비해 뒀다면(Phase 2 단계 1′, 선택) zero-shot 객관식
-세 세트(HellaSwag, ARC-Easy, KoBEST-HellaSwag)를 validation loss와는 별도 주기로 채점합니다
-(`downstream_interval`, 기본 1,000스텝 + step 0 baseline).
+`generation` 섹션은 **고정** 프롬프트 세트를 씁니다(모든 체크포인트에서 동일 시드 → 품질을 같은
+조건으로 비교): 영어 `"The meaning of life is"`, `"Artificial intelligence can"`,
+`"In the future, small language models"`; 한국어 `"인공지능이란"`, `"대한민국의 수도는"`,
+`"작은 언어 모델을 직접 학습하면"`. **직접 준** 프롬프트로 생성하려면 `sample.py`(§7.3)를 쓰세요.
 
-채점은 length-normalized continuation log-likelihood(`acc_norm`)입니다. 태스크마다 `margin_max`,
-`margin_mean`(정답에서 가장 강한 / 평균 오답을 뺀 값)도 기록합니다. chance 근처에서는 accuracy가
-잘 안 움직이는 동안에도 margin은 움직이므로, 정답이 뒤집히기 전에 학습 여부를 볼 수 있습니다. 집계
-지표는 `downstream/en_avg`, `downstream/ko_avg`, `downstream/overall_avg`입니다. 이 규모(tpp ~10)에서
-HellaSwag은 오래 chance(25%) 근처에 머물고 KoBEST는 Phase 3 전까지 거의 안 움직이므로, 절대 점수보다
-추세를 보는 용도입니다. 500문항은 변동이 커서 best checkpoint 선정에는 쓰지 않고 **그 기준은
-validation loss로 유지**합니다. `downstream_enabled: false`로 전체를 끄거나, 개별 태스크의
-`enabled: false`로 하나만 뺄 수 있습니다.
+### 7.2 Downstream 벤치마크
 
-**텍스트 생성**: KV cache 자기회귀 생성. 같은 시드면 결과가 재현됩니다.
+고정 다지선다 스위트(Phase 2 단계 1′에서 세트 생성)이며, 길이 정규화 continuation log-likelihood
+(`acc_norm`)로 채점합니다 — 태스크 전용 헤드도, 파인튜닝도 없습니다. 서로 다른 두 곳에서 돕니다:
+
+| | 태스크 | 시점 | 위치 |
+|---|---|---|---|
+| **최종** | 활성화된 12개 전부 | 학습 후 한 번 | `evaluate.py` (§7.1) |
+| **학습 중** | `during_training` 표시된 가벼운 3개 | 매 `downstream_interval`(기본 1,000스텝) + step 0 baseline | 학습 루프 |
+
+학습 중에는 3개(HellaSwag, ARC-Easy, KoBEST-HellaSwag)만 돌려 루프를 가볍게 유지하고, 최종 실행이
+전부를 채점합니다. `evaluate.py` 출력은 `downstream.tasks[이름]`(`acc_norm`, `margin_max`,
+`margin_mean`, `n`)과 `downstream.aggregates`(`en_avg` / `ko_avg` / `overall_avg`)를 기록합니다.
+
+`margin_max` / `margin_mean`(정답에서 가장 강한 / 평균 오답을 뺀 값)은 정답이 뒤집히기 전에 먼저
+움직이므로, 약 500문항이라 변동이 큰(표준오차 ~2%) chance 근처에서 유용합니다. 이 규모(tpp ~10)에서
+HellaSwag은 오래 25% 근처에 머물고 KoBEST는 Phase 3 전까지 거의 안 움직이니, 절대 점수보다 추세를
+보세요. **best 체크포인트 선정은 항상 validation loss로 유지**하고 이 지표로는 하지 않습니다.
+
+토글: `downstream_enabled: false`(전체 끄기) · 태스크의 `enabled: false`(하나 빼기) ·
+`during_training: false`(최종에서만).
+
+### 7.3 텍스트 생성 — `scripts/sample.py`
+
+**직접 준** 프롬프트로 자유롭게 생성합니다(KV cache 자기회귀). 같은 시드면 결과가 재현됩니다.
 
 ```bash
 python scripts/sample.py \
@@ -562,11 +604,6 @@ python scripts/sample.py \
 | `--temperature` | `0.8` | 0이면 greedy |
 | `--top-k` / `--top-p` | `50` / `1.0` | 샘플링 필터 |
 | `--seed` | `1234` | 재현용 시드 |
-
-**고정 평가 프롬프트** (모든 체크포인트에서 동일 시드로 비교):
-영어 `"The meaning of life is"`, `"Artificial intelligence can"`,
-`"In the future, small language models"` / 한국어 `"인공지능이란"`, `"대한민국의 수도는"`,
-`"작은 언어 모델을 직접 학습하면"`.
 
 ---
 

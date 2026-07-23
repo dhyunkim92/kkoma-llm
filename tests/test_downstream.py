@@ -15,6 +15,7 @@ import torch
 from kkoma.evaluation.downstream import (
     MultipleChoiceExample,
     continuation_logprob,
+    evaluate_downstream_suite,
     evaluate_task,
     load_examples,
     score_choices,
@@ -269,3 +270,75 @@ def test_load_examples_roundtrip(tmp_path):
     assert [e.context for e in got] == ["Q1", "Q2"]
     assert [e.label for e in got] == [1, 0]
     assert [len(e.choices) for e in got] == [2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Per-choice context (WinoGrande), full-suite aggregation, and the in-training
+# task filter used by the final evaluation.
+# ---------------------------------------------------------------------------
+
+
+def test_score_choices_uses_per_choice_context(model, tiny_tokenizer, device):
+    """WinoGrande scores each option's continuation under its OWN context.
+
+    The shared ``context`` must be ignored when ``contexts`` is set, and each
+    score must match the reference log-likelihood under that option's prefix.
+    """
+
+    ex = MultipleChoiceExample(
+        context="THIS SHOULD BE IGNORED",
+        choices=[" was too big.", " was too big."],
+        label=0,
+        contexts=["The trophy did not fit because the trophy",
+                  "The trophy did not fit because the case"],
+    )
+    scores = score_choices(model, tiny_tokenizer, [ex], device)[0]
+    for ci, (ctx, cont) in enumerate(zip(ex.contexts, ex.choices)):
+        lp, n = continuation_logprob(model, tiny_tokenizer, ctx, cont, device)
+        assert scores[ci] == pytest.approx(lp / n, abs=1e-4)
+
+
+def test_load_examples_reads_per_choice_contexts(tmp_path):
+    path = tmp_path / "wino.jsonl"
+    rec = {"contexts": ["prefix a", "prefix b"], "choices": [" s", " s"], "label": 1}
+    path.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+
+    got = load_examples(str(path))
+    assert got[0].contexts == ["prefix a", "prefix b"]
+    assert got[0].context == ""  # absent in the record -> default, unused
+    assert got[0].label == 1
+
+
+def test_downstream_suite_aggregates_by_language(model, tiny_tokenizer, device, examples):
+    tasks = [("hellaswag", "en", examples), ("kobest_boolq", "ko", examples)]
+    out = evaluate_downstream_suite(model, tiny_tokenizer, tasks, device, batch_size=8)
+
+    assert set(out["tasks"]) == {"hellaswag", "kobest_boolq"}
+    agg = out["aggregates"]
+    assert set(agg) == {"en_avg", "ko_avg", "overall_avg"}
+    en = out["tasks"]["hellaswag"]["acc_norm"]
+    ko = out["tasks"]["kobest_boolq"]["acc_norm"]
+    assert agg["en_avg"] == pytest.approx(en, abs=1e-6)
+    assert agg["ko_avg"] == pytest.approx(ko, abs=1e-6)
+    assert agg["overall_avg"] == pytest.approx((en + ko) / 2, abs=1e-6)
+
+
+def test_build_downstream_tasks_filters_during_training(tmp_path):
+    from kkoma.config import DownstreamTask, RunConfig
+    from scripts._common import build_downstream_tasks
+
+    p1 = tmp_path / "a.jsonl"
+    p1.write_text(json.dumps({"context": "x", "choices": [" a", " b"], "label": 0}) + "\n")
+    p2 = tmp_path / "b.jsonl"
+    p2.write_text(json.dumps({"context": "y", "choices": [" a", " b"], "label": 1}) + "\n")
+
+    cfg = RunConfig()
+    cfg.evaluation.downstream_tasks = [
+        DownstreamTask(name="a", path=str(p1), language="en", during_training=True),
+        DownstreamTask(name="b", path=str(p2), language="ko", during_training=False),
+    ]
+
+    train = build_downstream_tasks(cfg, during_training_only=True)
+    final = build_downstream_tasks(cfg, during_training_only=False)
+    assert [t[0] for t in train] == ["a"]  # heavy task withheld from training
+    assert sorted(t[0] for t in final) == ["a", "b"]  # final scores everything

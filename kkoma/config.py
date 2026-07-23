@@ -180,6 +180,11 @@ class DownstreamTask:
     path: str
     language: str = "en"  # groups the en_avg / ko_avg aggregates
     enabled: bool = True
+    # Scored on the in-training cadence (downstream_interval). Heavier tasks can
+    # be reserved for the post-training run (scripts/evaluate.py) by setting this
+    # false: the trainer then skips them, but the final evaluation still scores
+    # every enabled task. Keeps the training loop's benchmark pass light.
+    during_training: bool = True
 
 
 @dataclass

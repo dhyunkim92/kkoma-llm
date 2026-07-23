@@ -136,13 +136,17 @@ def build_val_loaders(
     return loaders
 
 
-def build_downstream_tasks(config: RunConfig) -> list:
+def build_downstream_tasks(config: RunConfig, during_training_only: bool = True) -> list:
     """Load the frozen benchmark sets named in the config (spec 21.3).
 
     Returns ``[(name, language, examples), ...]``. A task whose file is missing
     is reported and skipped rather than raising: the sets come from a separate
     prepare step, and a run should not die at step 0 because someone has not
     fetched them yet.
+
+    ``during_training_only`` (the trainer's default) keeps only the tasks flagged
+    for the in-training cadence; the post-training evaluation passes ``False`` to
+    score every enabled task.
     """
 
     from kkoma.evaluation.downstream import load_examples
@@ -154,6 +158,8 @@ def build_downstream_tasks(config: RunConfig) -> list:
     tasks = []
     for task in ev.downstream_tasks:
         if not task.enabled:
+            continue
+        if during_training_only and not task.during_training:
             continue
         if not os.path.exists(task.path):
             if is_main_process():
