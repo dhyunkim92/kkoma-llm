@@ -120,7 +120,7 @@ kkoma-llm/
 │   ├── architecture/          #   core_125m_* / core_350m_* (누적 progressive, 각 5개)
 │   ├── pretraining/           #   base_{125m,350m,800m,1b,1.3b}.yaml
 │   └── continued_pretraining/ #   ko_{125m,350m,800m,1b,1.3b}.yaml
-├── scripts/                   # CLI: prepare_* / train_* / evaluate / sample
+├── scripts/                   # CLI: prepare_* / train_* / evaluate / leaderboard / sample
 ├── tests/                     # 유닛·통합 테스트 (pytest)
 └── artifacts/                 # 토크나이저·체크포인트·로그·평가 결과
 ```
@@ -585,6 +585,23 @@ HellaSwag은 오래 25% 근처에 머물고 KoBEST는 Phase 3 전까지 거의 �
 
 토글: `downstream_enabled: false`(전체 끄기) · 태스크의 `enabled: false`(하나 빼기) ·
 `during_training: false`(최종에서만).
+
+**모델 간 리더보드.** 여러 체크포인트를 평가해 두었다면(각각 JSON 하나), 하나의 순위표로 집계합니다:
+
+```bash
+python scripts/leaderboard.py \
+    --input-dir artifacts/evaluation \
+    --output artifacts/evaluation/leaderboard
+```
+
+`leaderboard.md`(모델별 한 행, `overall_avg` 기준 정렬, 파라미터 수·각 태스크 `acc_norm`·en/ko/overall
+집계·validation loss/perplexity 포함)와 `leaderboard.csv`(스프레드시트용 원시 숫자)를 씁니다.
+`--no-downstream`으로 평가한 실행도 목록에 남고, 빠진 점수는 `–`로 표시됩니다.
+
+| Model | Params | Overall | EN avg | KO avg | … | val loss | ppl |
+|---|---|---|---|---|---|---|---|
+| base-1b | 879.0M | 41.2 | 44.2 | 36.2 | … | 3.21 | 22.4 |
+| base-350m | 350.0M | 36.1 | 39.1 | 31.1 | … | 3.40 | 28.1 |
 
 ### 7.3 텍스트 생성 — `scripts/sample.py`
 

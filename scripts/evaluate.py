@@ -55,7 +55,11 @@ def main() -> None:
     model.eval()
 
     tokenizer = build_tokenizer(config)
-    results: dict = {"checkpoint": args.checkpoint, "parameters": model.parameter_report()}
+    results: dict = {
+        "run_name": config.project.run_name,  # leaderboard label (scripts/leaderboard.py)
+        "checkpoint": args.checkpoint,
+        "parameters": model.parameter_report(),
+    }
 
     val_loaders = build_val_loaders(config, tokenizer)
     if val_loaders:

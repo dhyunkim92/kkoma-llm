@@ -124,7 +124,7 @@ kkoma-llm/
 │   ├── architecture/          #   core_125m_* / core_350m_* (cumulative progressive, 5 each)
 │   ├── pretraining/           #   base_{125m,350m,800m,1b,1.3b}.yaml
 │   └── continued_pretraining/ #   ko_{125m,350m,800m,1b,1.3b}.yaml
-├── scripts/                   # CLI: prepare_* / train_* / evaluate / sample
+├── scripts/                   # CLI: prepare_* / train_* / evaluate / leaderboard / sample
 ├── tests/                     # unit & integration tests (pytest)
 └── artifacts/                 # tokenizer, checkpoints, logs, evaluation results
 ```
@@ -609,6 +609,25 @@ trend, not the absolute score. **Best-checkpoint selection stays on validation l
 
 Toggles: `downstream_enabled: false` (all off) · a task's `enabled: false` (drop one) ·
 `during_training: false` (final-only).
+
+**Leaderboard across models.** Once several checkpoints have been evaluated (one JSON each),
+aggregate them into one ranked table:
+
+```bash
+python scripts/leaderboard.py \
+    --input-dir artifacts/evaluation \
+    --output artifacts/evaluation/leaderboard
+```
+
+It writes `leaderboard.md` — one row per model, ranked by `overall_avg`, with params, each task's
+`acc_norm`, the en/ko/overall aggregates, and validation loss/perplexity — and `leaderboard.csv`
+(raw numbers for a spreadsheet). Runs evaluated with `--no-downstream` still list, with `–` for the
+missing scores.
+
+| Model | Params | Overall | EN avg | KO avg | … | val loss | ppl |
+|---|---|---|---|---|---|---|---|
+| base-1b | 879.0M | 41.2 | 44.2 | 36.2 | … | 3.21 | 22.4 |
+| base-350m | 350.0M | 36.1 | 39.1 | 31.1 | … | 3.40 | 28.1 |
 
 ### 7.3 Text generation — `scripts/sample.py`
 
