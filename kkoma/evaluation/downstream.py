@@ -244,6 +244,7 @@ def evaluate_downstream_suite(
     device: torch.device,
     batch_size: int = 16,
     reduce_fn=None,
+    on_task=None,
 ) -> dict:
     """Score a list of ``(name, language, examples)`` tasks in one pass.
 
@@ -251,6 +252,9 @@ def evaluate_downstream_suite(
     ``overall_avg`` language aggregates — the shape the post-training evaluation
     (scripts/evaluate.py) writes out. The trainer keeps its own DDP-sharded loop
     because it also streams each task to W&B as it goes.
+
+    ``on_task(name, language, result)`` is called after each task finishes, so a
+    caller can print progress live rather than waiting for the whole suite.
     """
 
     per_task: dict = {}
@@ -262,6 +266,8 @@ def evaluate_downstream_suite(
         )
         per_task[name] = {"language": language, **r}
         by_lang.setdefault(language, []).append(r["acc_norm"])
+        if on_task is not None:
+            on_task(name, language, r)
 
     def _mean(xs: list[float]) -> float:
         return sum(xs) / len(xs) if xs else float("nan")

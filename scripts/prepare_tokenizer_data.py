@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 
 from kkoma.config import DataSource
+from scripts._console import ok
 from scripts._prepare import hard_exit, prepare_corpus
 
 
@@ -82,7 +83,7 @@ def main() -> None:
         show_progress=not args.no_progress,
         shuffle_buffer=args.shuffle_buffer,
     )
-    print(
+    ok(
         f"docs={result.documents} bytes={result.bytes/1e9:.2f}GB "
         f"shards={len(result.shards)} manifest={result.manifest_path}"
     )

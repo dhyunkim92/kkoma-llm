@@ -44,6 +44,7 @@ import shutil
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from scripts._console import done, line, ok, section
 from scripts._prepare import hard_exit
 
 
@@ -505,17 +506,24 @@ def _write_manifest(out_dir: str, seed: int, entries: list[dict], purged: list[s
 
 
 def build_task(spec: TaskSpec, out_dir: str, seed: int) -> dict:
+    import inspect
+
     from datasets import load_dataset
 
-    # Some sources (e.g. winogrande, super_glue) load via a dataset script and
-    # need trust_remote_code on newer `datasets`; older versions lack the arg.
-    try:
-        ds = load_dataset(
-            spec.repo, spec.subset, split=spec.split,
-            revision=spec.revision, trust_remote_code=True,
-        )
-    except TypeError:
-        ds = load_dataset(spec.repo, spec.subset, split=spec.split, revision=spec.revision)
+    subset = f":{spec.subset}" if spec.subset else ""
+    t0 = section(f"{spec.name}  (downloading {spec.repo}{subset}, {spec.split})")
+
+    # A few sources ship a loading script (winogrande, super_glue, hellaswag …).
+    # datasets < 4.0 needs trust_remote_code=True to run it; datasets >= 5.0
+    # removed the argument entirely and loads these via the Hub's auto-parquet
+    # export instead. Pass the flag only when the installed version accepts it,
+    # so we neither raise nor print the 5.0 "not supported anymore" notice.
+    kwargs = {}
+    if "trust_remote_code" in inspect.signature(load_dataset).parameters:
+        kwargs["trust_remote_code"] = True
+    ds = load_dataset(
+        spec.repo, spec.subset, split=spec.split, revision=spec.revision, **kwargs
+    )
     source_size = len(ds)
 
     records, dropped = [], 0
@@ -534,11 +542,11 @@ def build_task(spec: TaskSpec, out_dir: str, seed: int) -> dict:
 
     n_choices = sorted({len(r["choices"]) for r in picked})
     labels = sorted({r["label"] for r in picked})
-    print(
-        f"  {spec.name:20s} {source_size:6,d} -> {len(picked):4,d}  "
-        f"choices={n_choices} labels={labels}"
-        + (f"  (dropped {dropped} without gold)" if dropped else "")
+    line(
+        f"{len(picked):,} of {source_size:,} kept  ·  choices={n_choices}  ·  labels={labels}"
+        + (f"  ·  dropped {dropped} without gold" if dropped else "")
     )
+    done(t0)
 
     return {
         "name": spec.name,
@@ -598,9 +606,9 @@ def main() -> None:
 
     manifest = _write_manifest(args.output_dir, args.seed, entries, purged)
     total = sum(e["sample_size"] for e in entries)
-    print(f"\n{total:,} questions across {len(entries)} task(s); manifest -> {manifest}")
     if purged:
-        print(f"removed {len(purged)} source cache path(s); pass --keep-source to retain them")
+        line(f"removed {len(purged)} source cache path(s); pass --keep-source to retain them")
+    ok(f"{total:,} questions across {len(entries)} task(s); manifest -> {manifest}")
 
     hard_exit()
 

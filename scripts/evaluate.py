@@ -32,6 +32,7 @@ from kkoma.evaluation.language_modeling import evaluate_bilingual
 from kkoma.model.model import KkomaModel
 from kkoma.training.checkpoint import load_checkpoint
 from scripts._common import build_downstream_tasks, build_tokenizer, build_val_loaders
+from scripts._console import done, line, ok, section
 
 
 def main() -> None:
@@ -48,63 +49,87 @@ def main() -> None:
     config = RunConfig.from_yaml(args.config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    t0 = section(f"loading checkpoint on {device}")
     model = KkomaModel(config.model).to(device)
     # restore_rng=False: evaluation only reads the model; it must not adopt the
     # training run's RNG state (generation uses evaluation.sampling_seed instead).
     load_checkpoint(args.checkpoint, model, map_location=str(device), restore_rng=False)
     model.eval()
-
     tokenizer = build_tokenizer(config)
+    params = model.parameter_report()
+    line(f"{config.project.run_name} | {params['total'] / 1e6:.1f}M params | {args.checkpoint}")
+    done(t0)
+
     results: dict = {
         "run_name": config.project.run_name,  # leaderboard label (scripts/leaderboard.py)
         "checkpoint": args.checkpoint,
-        "parameters": model.parameter_report(),
+        "parameters": params,
     }
 
+    # ---- validation loss (EN / KO) ----------------------------------------
     val_loaders = build_val_loaders(config, tokenizer)
     if val_loaders:
-        results["language_modeling"] = evaluate_bilingual(
-            model, val_loaders, device, max_batches=args.max_batches
-        )
+        t0 = section("language modeling (validation loss)")
+        lm = evaluate_bilingual(model, val_loaders, device, max_batches=args.max_batches)
+        results["language_modeling"] = lm
+        for lang in [k for k in lm if k != "all"] + (["all"] if "all" in lm else []):
+            r = lm[lang]
+            line(f"{lang:<3} loss {r['loss']:.4f}  ppl {r['perplexity']:.1f}")
+        done(t0)
 
-    # Full downstream suite: every enabled task (during_training_only=False),
-    # not just the light set the trainer scores mid-run.
+    # ---- downstream suite: every enabled task (during_training_only=False) --
     if not args.no_downstream:
         tasks = build_downstream_tasks(config, during_training_only=False)
         if tasks:
+            t0 = section(f"downstream benchmarks ({len(tasks)} tasks)")
+
+            def _on_task(name, language, r):
+                line(f"{name:<20} [{language}] acc_norm {r['acc_norm']:.3f}"
+                      f"  (margin {r['margin_mean']:+.3f}, n={r['n']})")
+
             results["downstream"] = evaluate_downstream_suite(
                 model, tokenizer, tasks, device,
                 batch_size=config.evaluation.downstream_batch_size,
+                on_task=_on_task,
             )
             agg = results["downstream"]["aggregates"]
-            print(
-                "downstream: "
-                + " ".join(f"{k}={v:.3f}" for k, v in agg.items())
-            )
+            line("→ " + "  ".join(f"{k} {v:.3f}" for k, v in agg.items()))
+            done(t0)
         else:
-            print(
-                "[downstream] no benchmark files found; run "
-                "scripts/prepare_downstream_data.py (or pass --no-downstream)"
-            )
+            print("\n▸ downstream benchmarks … skipped")
+            line("no benchmark files found; run scripts/prepare_downstream_data.py "
+                  "(or pass --no-downstream)")
 
-    results["efficiency"] = benchmark_forward(
+    # ---- efficiency -------------------------------------------------------
+    t0 = section("efficiency")
+    eff = benchmark_forward(
         model, device, batch_size=2, seq_len=min(512, config.model.context_length), steps=5
     )
+    results["efficiency"] = eff
+    line(f"{eff['tokens_per_second']:,.0f} tok/s  |  {eff['step_time_ms']:.1f} ms/step"
+          f"  |  {eff['peak_allocated_mb']:,.0f} MB peak")
+    done(t0)
 
+    # ---- generation samples (fixed prompts, spec 21.4) --------------------
     if not args.no_generation:
-        # Fixed prompt set + sampling seed from the config (spec 21.4) so every
-        # checkpoint is sampled under identical conditions.
         ev = config.evaluation
-        results["generation"] = generate_samples(
-            model, tokenizer, device,
-            prompts=ev.generation_prompts_en + ev.generation_prompts_ko,
-            seed=ev.sampling_seed,
+        prompts = ev.generation_prompts_en + ev.generation_prompts_ko
+        t0 = section(f"generation ({len(prompts)} fixed prompts)")
+        samples = generate_samples(
+            model, tokenizer, device, prompts=prompts, seed=ev.sampling_seed,
         )
+        results["generation"] = samples
+        for s in samples:
+            cont = s["completion"].replace("\n", " ")
+            if len(cont) > 80:
+                cont = cont[:80] + "…"
+            line(f"{s['prompt']!r} → {cont}")
+        done(t0)
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    print(f"evaluation written to {args.output}")
+    ok(f"evaluation written to {args.output}")
 
 
 if __name__ == "__main__":

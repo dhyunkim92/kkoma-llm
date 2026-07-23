@@ -32,6 +32,8 @@ import csv
 import glob
 import json
 
+from scripts._console import ok
+
 
 def _model_label(data: dict, path: str) -> str:
     """Row label: the run name, else the checkpoint's dir/stem, else the file."""
@@ -146,7 +148,7 @@ def main() -> None:
     write_csv(rows, task_names, csv_path)
 
     print(table)
-    print(f"wrote {md_path} and {csv_path} ({len(rows)} model(s))")
+    ok(f"wrote {md_path} and {csv_path} ({len(rows)} model(s))")
 
 
 if __name__ == "__main__":

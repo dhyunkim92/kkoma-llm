@@ -32,6 +32,7 @@ import argparse
 
 from kkoma.config import DataSource
 from kkoma.tokenizer.utils import KkomaTokenizer
+from scripts._console import ok
 from scripts._prepare import hard_exit, prepare_corpus
 
 EN = DataSource(name="HuggingFaceFW/fineweb-edu", subset="default", weight=1.0)
@@ -69,7 +70,7 @@ def main() -> None:
     ko_va = prepare_corpus([KO], f"{out}/val_ko", max_tokens=args.val_tokens // 2,
                            seed=args.seed + 1, split="val", **common)
 
-    print(
+    ok(
         f"train: en={en_tr.tokens/1e6:.1f}M ko={ko_tr.tokens/1e6:.1f}M | "
         f"val: en={en_va.tokens/1e6:.1f}M ko={ko_va.tokens/1e6:.1f}M"
     )

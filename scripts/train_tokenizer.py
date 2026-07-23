@@ -20,6 +20,7 @@ import glob
 
 from kkoma.tokenizer.evaluate import evaluate_tokenizer
 from kkoma.tokenizer.train import TokenizerTrainConfig, train_tokenizer
+from scripts._console import done, line, ok, section
 
 
 def main() -> None:
@@ -51,17 +52,22 @@ def main() -> None:
         value = getattr(args, arg_name)
         if value is not None:
             setattr(config, field_name, value)
+
+    t0 = section(f"training byte-level BPE ({len(files)} files, vocab {config.vocab_size:,})")
     tokenizer = train_tokenizer(config)
-    print(f"trained tokenizer: vocab_size={tokenizer.get_vocab_size()}")
+    line(f"vocab_size={tokenizer.get_vocab_size():,} -> {config.output_dir}")
+    done(t0)
 
     # Quick qualitative evaluation against the spec's sample sentences.
+    t0 = section("evaluating on sample sentences")
     evaluate_tokenizer(
         config.output_dir,
         english_texts=["The model is trained from scratch."],
         korean_texts=["이 모델은 처음부터 직접 학습되었습니다."],
         output_path=f"{config.output_dir}/evaluation.json",
     )
-    print(f"evaluation written to {config.output_dir}/evaluation.json")
+    done(t0)
+    ok(f"tokenizer + evaluation written to {config.output_dir}/")
 
 
 if __name__ == "__main__":

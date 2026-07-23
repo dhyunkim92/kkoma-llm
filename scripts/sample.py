@@ -23,6 +23,7 @@ from kkoma.generation.generate import GenerationConfig, generate
 from kkoma.model.model import KkomaModel
 from kkoma.training.checkpoint import load_checkpoint
 from scripts._common import build_tokenizer
+from scripts._console import done, line, ok, section
 
 
 def main() -> None:
@@ -40,11 +41,14 @@ def main() -> None:
     config = RunConfig.from_yaml(args.config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    t0 = section(f"loading checkpoint on {device}")
     model = KkomaModel(config.model).to(device)
-    load_checkpoint(args.checkpoint, model, map_location=str(device))
+    load_checkpoint(args.checkpoint, model, map_location=str(device), restore_rng=False)
     model.eval()
-
     tokenizer = build_tokenizer(config)
+    line(f"{config.project.run_name} | {model.num_parameters() / 1e6:.1f}M params | {args.checkpoint}")
+    done(t0)
+
     ids = tokenizer.encode(args.prompt, add_bos=True)
     input_ids = torch.tensor([ids], dtype=torch.long, device=device)
 
@@ -57,8 +61,17 @@ def main() -> None:
         seed=args.seed,
         use_cache=True,
     )
+    t0 = section(
+        f"generating (max_new_tokens={args.max_new_tokens}, temperature={args.temperature}, "
+        f"top_k={args.top_k}, top_p={args.top_p}, seed={args.seed})"
+    )
     out = generate(model, input_ids, gen_cfg)[0].tolist()
+    done(t0)
+
+    # The generated text is the product, so print it plainly (unindented).
+    print()
     print(tokenizer.decode(out))
+    ok(f"{len(out) - len(ids)} tokens generated")
 
 
 if __name__ == "__main__":

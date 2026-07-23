@@ -32,6 +32,7 @@ import argparse
 
 from kkoma.config import DataSource
 from kkoma.tokenizer.utils import KkomaTokenizer
+from scripts._console import line, ok
 from scripts._prepare import hard_exit, prepare_corpus
 
 EN = DataSource(name="HuggingFaceFW/fineweb-edu", subset="default", weight=1.0)
@@ -69,11 +70,11 @@ def main() -> None:
     ko_va = prepare_corpus([KO], f"{out}/val_ko", max_tokens=args.val_tokens // 2,
                            seed=args.seed + 7, split="val", **common)
 
-    print(
+    line("125M/350M/800M/1B/1.3B read 1.25B/3.5B/8B/9B/11.5B of these shards (set by max_tokens in each config).")
+    ok(
         f"train: en={en_tr.tokens/1e9:.2f}B ko={ko_tr.tokens/1e9:.2f}B | "
         f"val: en={en_va.tokens/1e6:.1f}M ko={ko_va.tokens/1e6:.1f}M"
     )
-    print("125M/350M/800M/1B/1.3B read 1.25B/3.5B/8B/9B/11.5B of these shards (set by max_tokens in each config).")
 
     # Avoid the datasets-streaming shutdown race; data is already written.
     hard_exit()
