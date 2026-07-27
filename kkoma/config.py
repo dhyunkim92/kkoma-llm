@@ -80,6 +80,13 @@ def default_ffn_dim(d_model: int, activation: str, multiple_of: int = 128) -> in
     GELU MLP uses ``4 * d_model``. SwiGLU adds a third projection, so the spec
     recommends ``~8/3 * d_model`` and rounding to a multiple of 64/128 for
     tensor-core efficiency.
+
+    The rounding decides whether parity actually holds, and it is not always
+    kind: at ``d_model=768`` it lands exactly (2048 vs 3072, both 4.72M FFN
+    params), but at 1024 it rounds 2730.7 up to 2816 and hands SwiGLU 3.1% more
+    parameters than GELU. An architecture comparison cannot absorb that, so the
+    350M study configs pin ``d_ff`` explicitly rather than deriving it. Check
+    any new size before trusting the derived value.
     """
 
     if activation == "gelu":

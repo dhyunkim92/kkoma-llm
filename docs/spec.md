@@ -719,7 +719,9 @@ d_model: 1,024
 n_head: 16
 n_kv_head: 4 또는 16
 head_dim: 64
-d_ff: SwiGLU 기준 2,816 (`8/3 x d_model`를 128의 배수로 올림)
+d_ff: SwiGLU 기준 **2,752** (config에 명시). `8/3 x d_model`을 128 배수로 올리면 2,816이 되는데,
+이는 GELU arm(2 x 1024 x 4096 = 8.39M)보다 FFN 파라미터가 3.1% 많아져 activation 비교가 크기
+비교로 바뀐다. 정확한 동등점은 2,730.7이고 가장 가까운 64 배수인 2,752를 쓰면 +0.8%로 좁혀진다.
 context_length: 1,024
 vocab_size: 32,768
 ```

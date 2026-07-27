@@ -104,21 +104,54 @@ def test_swiglu_and_gelu_ffn_params_are_matched_at_study_dims(d_model):
     assert gap / _ffn_params(d_model, "gelu") < 0.05
 
 
-def test_ffn_parity_is_exact_at_768_and_known_off_at_1024():
-    """Pin the rounding's actual effect rather than trusting it is negligible.
+def test_derived_ffn_parity_is_exact_at_768_but_not_at_1024():
+    """`default_ffn_dim` alone does not guarantee parity — the rounding decides.
 
     `_round_to_multiple(8/3*d, 128)` lands exactly on parity at 768 and
-    overshoots at 1024, so the 350M arm gives SwiGLU ~2% more parameters than
-    GELU. Small, but the study's whole claim is that one component changed and
-    nothing else did, so the number belongs in a test rather than in nobody's
-    head. Raising `multiple_of` or pinning `d_ff` explicitly would close it.
+    overshoots at 1024 by 3.1%. That is why the 350M study configs pin `d_ff`
+    rather than deriving it; see the config-level test below, which is the one
+    that actually guards the ablation.
     """
 
     assert _ffn_params(768, "swiglu") == _ffn_params(768, "gelu")
 
     swiglu, gelu = _ffn_params(1024, "swiglu"), _ffn_params(1024, "gelu")
-    assert swiglu > gelu
     assert (swiglu - gelu) / gelu == pytest.approx(0.031, abs=0.002)
+
+
+def test_shipped_architecture_configs_are_parameter_matched():
+    """The ablation is only a fair comparison if the arms are the same size.
+
+    Checks the files that actually get run, not the helper in isolation: for
+    each model size, every GELU config must have the same FFN parameter count
+    as every other, likewise SwiGLU, and the two must agree within 1%.
+    """
+
+    import glob
+
+    from kkoma.config import RunConfig
+
+    by_size: dict = {}
+    for path in sorted(glob.glob("configs/architecture/*.yaml")):
+        m = RunConfig.from_yaml(path).model
+        n_proj = 3 if m.activation == "swiglu" else 2
+        by_size.setdefault(m.d_model, {}).setdefault(m.activation, {})[path] = (
+            n_proj * m.d_model * m.d_ff
+        )
+
+    assert by_size, "no architecture configs found"
+    for d_model, arms in by_size.items():
+        for activation, per_file in arms.items():
+            counts = set(per_file.values())
+            assert len(counts) == 1, f"{activation} arms disagree at d_model={d_model}: {per_file}"
+        if len(arms) < 2:
+            continue
+        gelu = next(iter(arms["gelu"].values()))
+        swiglu = next(iter(arms["swiglu"].values()))
+        assert abs(swiglu - gelu) / gelu < 0.01, (
+            f"d_model={d_model}: SwiGLU {swiglu:,} vs GELU {gelu:,} "
+            f"({100 * (swiglu - gelu) / gelu:+.2f}%) — pin d_ff to rebalance"
+        )
 
 
 @pytest.mark.parametrize("norm", NORMS)
