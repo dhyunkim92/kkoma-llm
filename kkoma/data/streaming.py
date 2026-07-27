@@ -120,10 +120,17 @@ def stream_source(
     shuffle = shuffle_seed is not None and shuffle_buffer > 0
     seed = shuffle_seed if shuffle else None
 
-    if source.path and source.path.endswith((".parquet", ".parquet/*", "*.parquet")):
-        raw = _iter_parquet(source.path, source.text_key, seed)
-    elif source.path:
-        raw = _iter_jsonl(source.path, source.text_key, seed)
+    if source.path:
+        # Dispatch on what the glob actually matched, not on how it was
+        # spelled. A pattern like "shards/*.parquet.gz" or "dir/**" does not end
+        # in a recognized suffix, so a string test sent real parquet files to
+        # the JSONL reader — which swallows every parse error and yields
+        # nothing, with no file-not-found to explain it.
+        matched = _shard_files(source.path, seed=None)
+        if matched[0].endswith(".parquet"):
+            raw = _iter_parquet(source.path, source.text_key, seed)
+        else:
+            raw = _iter_jsonl(source.path, source.text_key, seed)
     else:
         raw = _iter_hf(source, seed, shuffle_buffer)
 

@@ -234,3 +234,27 @@ def test_kobest_boolq_and_sentineg_and_wic_choices():
     )
     assert w["choices"] == [" 아니오", " 예"]
     assert "배가 같은 뜻으로 쓰였나?" in w["context"]
+
+
+def test_parquet_is_detected_by_file_extension_not_glob_spelling(tmp_path):
+    """Dispatch must follow the matched files, not how the pattern was written.
+
+    A glob that does not end in a recognized suffix used to fall through to the
+    JSONL reader, which swallows every parse error — real parquet shards then
+    produced an empty stream with nothing to explain it.
+    """
+
+    pytest.importorskip("pyarrow")
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from kkoma.data.streaming import stream_source
+
+    d = tmp_path / "shards"
+    d.mkdir()
+    docs = [f"parquet document number {i} with enough characters" for i in range(6)]
+    pq.write_table(pa.table({"text": docs}), d / "part-0.parquet")
+
+    # Pattern ends in "*", not ".parquet" — the old string test missed this.
+    src = DataSource(name="pq", path=str(d / "part-*"))
+    assert sorted(stream_source(src)) == sorted(docs)

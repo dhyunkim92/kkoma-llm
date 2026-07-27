@@ -29,30 +29,44 @@ class CorpusStats:
     n_chars: int = 0
     n_words: int = 0
     n_tokens: int = 0
-    n_byte_tokens: int = 0
+    # Tokens that decode to a single character. This is the over-fragmentation
+    # signal: a tokenizer that never learned useful Korean merges falls back to
+    # emitting one token per syllable, which shows up here.
+    #
+    # It replaces an earlier `n_byte_tokens`, which counted "<0xNN>" fallback
+    # tokens and was structurally always zero: a ByteLevel pre-tokenizer maps
+    # every byte into the alphabet, so byte_fallback never fires and no such
+    # token can exist in this vocabulary (docs/audit-2026-07.md).
+    n_single_char_tokens: int = 0
 
     def merge(self, other: "CorpusStats") -> None:
         self.n_docs += other.n_docs
         self.n_chars += other.n_chars
         self.n_words += other.n_words
         self.n_tokens += other.n_tokens
-        self.n_byte_tokens += other.n_byte_tokens
+        self.n_single_char_tokens += other.n_single_char_tokens
 
 
-def _is_byte_token(token: Optional[str]) -> bool:
-    # Byte-level fallback tokens look like "<0xF0>" in byte_fallback BPE.
-    return bool(token) and token.startswith("<0x") and token.endswith(">")
+def _is_single_char_token(tok: KkomaTokenizer, token_id: int) -> bool:
+    """Does this id decode to exactly one character?
+
+    Decoding rather than reading the raw token string, because ByteLevel
+    represents a space as "Ġ" and multi-byte characters as several alphabet
+    symbols — the raw string's length says nothing about the text it covers.
+    """
+
+    return len(tok.decode([token_id], skip_special_tokens=False)) == 1
 
 
 def _score_text(tok: KkomaTokenizer, text: str) -> CorpusStats:
     ids = tok.encode(text)
-    n_byte = sum(1 for i in ids if _is_byte_token(tok.id_to_token(i)))
+    n_single = sum(1 for i in ids if _is_single_char_token(tok, i))
     return CorpusStats(
         n_docs=1,
         n_chars=len(text),
         n_words=len(text.split()),
         n_tokens=len(ids),
-        n_byte_tokens=n_byte,
+        n_single_char_tokens=n_single,
     )
 
 
@@ -70,7 +84,10 @@ def evaluate_corpus(tok: KkomaTokenizer, texts) -> dict:
         "tokens_per_char": stats.n_tokens / chars,
         "compression_ratio_char_per_token": chars / max(stats.n_tokens, 1),
         "avg_sequence_length": stats.n_tokens / docs,
-        "byte_token_fraction": stats.n_byte_tokens / max(stats.n_tokens, 1),
+        # Fraction of tokens covering a single character — rises when the
+        # tokenizer has no useful merges for a script and falls back to
+        # per-syllable output.
+        "single_char_token_fraction": stats.n_single_char_tokens / max(stats.n_tokens, 1),
     }
 
 
@@ -85,8 +102,12 @@ def evaluate_tokenizer(
     result = {
         "vocab_size": len(tok),
         "embedding_parameters": len(tok),  # per-row; multiply by d_model downstream
+        # Each special token must encode to exactly one id. Checking only that
+        # it *has* an id (the previous check) would still pass if the token
+        # were split into pieces by the pre-tokenizer.
         "special_tokens_single_id": {
-            t: (tok.token_to_id(t) is not None) for t in SEMANTIC_TOKENS
+            t: (tok.encode(t, allow_special=True) == [tok.token_to_id(t)])
+            for t in SEMANTIC_TOKENS
         },
         "english": evaluate_corpus(tok, english_texts),
         "korean": evaluate_corpus(tok, korean_texts),
@@ -95,7 +116,10 @@ def evaluate_tokenizer(
                 "text": s,
                 "ids": tok.encode(s),
                 "n_tokens": len(tok.encode(s)),
-                "roundtrip_ok": tok.decode(tok.encode(s)).strip() != "",
+                # Exact round trip. The previous check only asserted the
+                # decode was non-empty, which a tokenizer that mangled every
+                # Korean character would still satisfy.
+                "roundtrip_ok": tok.decode(tok.encode(s), skip_special_tokens=False) == s,
             }
             for s in QUALITATIVE_SENTENCES
         ],
