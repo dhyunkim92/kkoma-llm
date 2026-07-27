@@ -38,12 +38,16 @@ def device() -> torch.device:
 
 
 @pytest.fixture(scope="session")
-def tiny_tokenizer(tmp_path_factory):
-    """Train a minimal byte-level BPE tokenizer with the Kkoma special tokens."""
+def tiny_tokenizer_dir(tmp_path_factory):
+    """Directory holding the trained fixture tokenizer.
+
+    Separate from ``tiny_tokenizer`` because anything that goes through a
+    ``RunConfig`` (``build_tokenizer``, ``run_training``) needs the path, not the
+    object. Session-scoped so the BPE is still trained only once.
+    """
 
     pytest.importorskip("tokenizers")
     from kkoma.tokenizer.train import TokenizerTrainConfig, train_tokenizer
-    from kkoma.tokenizer.utils import KkomaTokenizer
 
     out = tmp_path_factory.mktemp("tok")
     corpus = out / "corpus.txt"
@@ -61,4 +65,11 @@ def tiny_tokenizer(tmp_path_factory):
         vocab_size=300, min_frequency=1, output_dir=str(out), input_files=[str(corpus)]
     )
     train_tokenizer(cfg)
-    return KkomaTokenizer.from_file(str(out))
+    return str(out)
+
+
+@pytest.fixture(scope="session")
+def tiny_tokenizer(tiny_tokenizer_dir):
+    from kkoma.tokenizer.utils import KkomaTokenizer
+
+    return KkomaTokenizer.from_file(tiny_tokenizer_dir)

@@ -37,8 +37,21 @@ def _rng_states() -> dict:
 
 
 def _restore_rng(states: dict) -> None:
+    """Restore generator states saved by ``_rng_states``.
+
+    Every state has to be a CPU ByteTensor. ``read_checkpoint`` is called with
+    ``map_location`` set to the training device, and that moves *every* tensor
+    in the payload — the RNG states included — so on GPU they arrive as CUDA
+    tensors and ``set_rng_state`` rejects them. Resuming on GPU used to die here
+    with "RNG state must be a torch.ByteTensor", which named the symptom and not
+    the cause; no shipped run ever hit it because none used --resume.
+    """
+
+    def _cpu_byte(t):
+        return t.detach().to("cpu", torch.uint8) if torch.is_tensor(t) else t
+
     if states.get("torch") is not None:
-        torch.set_rng_state(states["torch"])
+        torch.set_rng_state(_cpu_byte(states["torch"]))
     if states.get("numpy") is not None:
         try:
             import numpy as np
@@ -47,7 +60,10 @@ def _restore_rng(states: dict) -> None:
         except Exception:
             pass
     if states.get("cuda") is not None and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(states["cuda"])
+        cuda_states = [_cpu_byte(s) for s in states["cuda"]]
+        # A checkpoint from a different GPU count cannot be applied per-device.
+        if len(cuda_states) == torch.cuda.device_count():
+            torch.cuda.set_rng_state_all(cuda_states)
 
 
 def _unwrap(model: torch.nn.Module) -> torch.nn.Module:

@@ -183,3 +183,105 @@ def test_min_chars_counts_characters_not_bytes():
     korean = "가나다라마바사아자차카타파하거너"  # exactly 16 characters
     assert len(korean) == 16
     assert clean_document(korean, cfg) == korean
+
+
+# ---------------------------------------------------------------------------
+# evaluation/generation.py and the HF streaming branch of data/streaming.py
+# ---------------------------------------------------------------------------
+
+
+def test_generate_samples_returns_one_record_per_prompt(tiny_tokenizer):
+    """The `generation` section of every evaluation JSON comes from here."""
+
+    from kkoma.evaluation.generation import generate_samples
+
+    cfg = tiny_config(vocab_size=len(tiny_tokenizer), context_length=64)
+    model = KkomaModel(cfg).eval()
+    prompts = ["The model", "이 모델은"]
+
+    out = generate_samples(model, tiny_tokenizer, torch.device("cpu"),
+                           prompts=prompts, max_new_tokens=4, seed=7)
+    assert [s["prompt"] for s in out] == prompts
+    for s in out:
+        assert isinstance(s["completion"], str)
+        assert len(s["token_ids"]) > 0
+
+
+def test_generate_samples_is_reproducible_under_a_seed(tiny_tokenizer):
+    from kkoma.evaluation.generation import generate_samples
+
+    cfg = tiny_config(vocab_size=len(tiny_tokenizer), context_length=64)
+    model = KkomaModel(cfg).eval()
+    kw = dict(prompts=["The model"], max_new_tokens=6, seed=11)
+    a = generate_samples(model, tiny_tokenizer, torch.device("cpu"), **kw)
+    b = generate_samples(model, tiny_tokenizer, torch.device("cpu"), **kw)
+    assert a[0]["token_ids"] == b[0]["token_ids"]
+
+
+def test_hf_source_passes_revision_subset_and_split_through(monkeypatch):
+    """The HF branch needs a network, so verify the call we make, not the data.
+
+    `revision` is what makes a streamed corpus reproducible; the audit noted it
+    is never set by any prepare script, and nothing checked it was even wired
+    through to `load_dataset`.
+    """
+
+    import datasets
+
+    from kkoma.config import DataSource
+    from kkoma.data.streaming import stream_source
+
+    captured = {}
+
+    class FakeDS:
+        def __init__(self, rows):
+            self.rows = rows
+            self.shuffled = None
+
+        def shuffle(self, seed, buffer_size):
+            self.shuffled = (seed, buffer_size)
+            return self
+
+        def __iter__(self):
+            return iter(self.rows)
+
+    def fake_load_dataset(name, subset, split=None, revision=None, streaming=None):
+        captured.update(name=name, subset=subset, split=split,
+                        revision=revision, streaming=streaming)
+        return FakeDS([{"text": "a streamed document long enough to survive cleaning"}])
+
+    monkeypatch.setattr(datasets, "load_dataset", fake_load_dataset)
+
+    src = DataSource(name="HuggingFaceFW/fineweb-2", subset="kor_Hang",
+                     split="train", revision="deadbeef", text_key="text")
+    docs = list(stream_source(src))
+
+    assert captured == {
+        "name": "HuggingFaceFW/fineweb-2", "subset": "kor_Hang",
+        "split": "train", "revision": "deadbeef", "streaming": True,
+    }
+    assert docs == ["a streamed document long enough to survive cleaning"]
+
+
+def test_hf_source_shuffles_with_the_configured_buffer(monkeypatch):
+    import datasets
+
+    from kkoma.config import DataSource
+    from kkoma.data.streaming import stream_source
+
+    seen = {}
+
+    class FakeDS:
+        def shuffle(self, seed, buffer_size):
+            seen.update(seed=seed, buffer_size=buffer_size)
+            return self
+
+        def __iter__(self):
+            return iter([{"text": "another sufficiently long streamed document"}])
+
+    monkeypatch.setattr(datasets, "load_dataset",
+                        lambda *a, **k: FakeDS())
+
+    src = DataSource(name="repo", text_key="text")
+    list(stream_source(src, shuffle_seed=5, shuffle_buffer=1000))
+    assert seen == {"seed": 5, "buffer_size": 1000}

@@ -176,3 +176,29 @@ def test_resume_allows_checkpoint_without_config():
     from scripts._common import check_resume_compatibility
 
     check_resume_compatibility({"global_step": 5}, RunConfig(), world_size=8)
+
+
+def test_rng_restores_when_the_payload_was_mapped_to_a_device():
+    """`read_checkpoint(map_location=...)` moves every tensor, RNG states too.
+
+    Resuming on GPU therefore handed `set_rng_state` a CUDA tensor and died
+    with "RNG state must be a torch.ByteTensor". No shipped run used --resume,
+    so it went unnoticed; this pins the coercion back to a CPU ByteTensor.
+    """
+
+    import torch
+
+    from kkoma.training.checkpoint import _restore_rng, _rng_states
+
+    states = _rng_states()
+    if torch.cuda.is_available():
+        moved = dict(states)
+        moved["torch"] = states["torch"].to("cuda")
+        if states.get("cuda") is not None:
+            moved["cuda"] = [s.to("cuda") for s in states["cuda"]]
+    else:
+        # Same coercion path: a non-uint8 dtype must also be accepted back.
+        moved = dict(states, torch=states["torch"].to(torch.int64))
+
+    _restore_rng(moved)          # must not raise
+    assert torch.get_rng_state().dtype == torch.uint8
