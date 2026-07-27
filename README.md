@@ -591,7 +591,10 @@ is compared apples-to-apples): EN `"The meaning of life is"`, `"Artificial intel
 > weight cast, and `training.precision` is not consulted (checkpoints store FP32 master weights, so
 > they load as FP32). Training and its *in-training* evaluation run under FP16 autocast (§10), so
 > the same benchmark can differ slightly between the last W&B point and the final number here.
-> FP32 is the more accurate of the two; the cost is roughly 2× the weight memory during evaluation.
+> FP32 is the more accurate of the two; the cost is roughly 2× the weight memory versus FP16.
+> Checkpoints are read with `map_location="cpu"` so the optimizer state they carry (~2× the
+> weights, unused here) never reaches the GPU — measured peak for the 1.3B on a V100 is **4.8 GB**
+> rather than the 17.1 GB a direct CUDA load costs.
 
 ### 7.2 Downstream benchmarks
 

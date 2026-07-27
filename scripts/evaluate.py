@@ -51,9 +51,14 @@ def main() -> None:
 
     t0 = section(f"loading checkpoint on {device}")
     model = KkomaModel(config.model).to(device)
+    # map_location="cpu": a training checkpoint carries the AdamW state (two
+    # moments, ~2x the weights) that evaluation never touches. Mapping straight
+    # to CUDA would pull all of it onto the GPU before it is discarded — 17.1 GB
+    # peak instead of 4.5 GB on the 1.3B. load_state_dict copies the CPU tensors
+    # into the already-placed CUDA parameters.
     # restore_rng=False: evaluation only reads the model; it must not adopt the
     # training run's RNG state (generation uses evaluation.sampling_seed instead).
-    load_checkpoint(args.checkpoint, model, map_location=str(device), restore_rng=False)
+    load_checkpoint(args.checkpoint, model, map_location="cpu", restore_rng=False)
     model.eval()
     tokenizer = build_tokenizer(config)
     params = model.parameter_report()

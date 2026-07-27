@@ -43,7 +43,10 @@ def main() -> None:
 
     t0 = section(f"loading checkpoint on {device}")
     model = KkomaModel(config.model).to(device)
-    load_checkpoint(args.checkpoint, model, map_location=str(device), restore_rng=False)
+    # map_location="cpu" so the checkpoint's optimizer state (unused here, ~2x
+    # the weights) never reaches the GPU; load_state_dict copies into the
+    # already-placed CUDA parameters. See scripts/evaluate.py for the numbers.
+    load_checkpoint(args.checkpoint, model, map_location="cpu", restore_rng=False)
     model.eval()
     tokenizer = build_tokenizer(config)
     line(f"{config.project.run_name} | {model.num_parameters() / 1e6:.1f}M params | {args.checkpoint}")
