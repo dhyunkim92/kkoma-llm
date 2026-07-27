@@ -1,13 +1,20 @@
 """Phase 3: Korean continued pretraining.
 
-Loads the English Kkoma-800M-Base weights and continues training on a
-Korean-heavy mixture (default 70% KO / 30% EN replay). The v1 default starts
-with a fresh optimizer state (controlled by --fresh-optimizer / config).
+Loads a Kkoma-<size>-Base checkpoint and continues training on a Korean-heavy
+mixture (default 70% KO / 30% EN replay, by document — see the note below).
+``--init-from`` loads weights only, so the run starts with a fresh optimizer
+state; ``--resume`` instead restores a full CPT run in progress.
+
+Note the mixture weights are per *document*, not per token. Sources with longer
+documents are over-represented per token and drain first: for the shipped 1.3B
+run the realized split was 64/36 until the English replay ran out at ~84% of the
+budget, after which the stream was Korean only. MixtureStream announces the
+exhaustion when it happens.
 
 Usage:
     python scripts/train_continued.py \
         --config configs/continued_pretraining/ko_800m.yaml \
-        --init-from artifacts/checkpoints/base_800m/final.pt
+        --init-from artifacts/checkpoints/base-800m/final.pt
 """
 
 from __future__ import annotations

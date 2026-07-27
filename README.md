@@ -593,7 +593,7 @@ is compared apples-to-apples): EN `"The meaning of life is"`, `"Artificial intel
 > practice this costs nothing and buys nothing measurable: on the 1.3B, validation loss over the
 > same batches came out **identical to four decimals** under FP16 autocast and FP32. Checkpoints are
 > read with `map_location="cpu"` so the optimizer state they carry (~2× the weights, unused here)
-> never reaches the GPU — measured peak for the 1.3B on a V100 is **4.8 GB** rather than the 17.1 GB
+> never reaches the GPU — measured peak for a 1.3B checkpoint on a V100 is **4.8 GB** rather than the 17.1 GB
 > a direct CUDA load costs.
 
 > **The `language_modeling` number is a small sample — do not compare it to the training curve.**
@@ -602,7 +602,8 @@ is compared apples-to-apples): EN `"The meaning of life is"`, `"Artificial intel
 > (10M by default) spread across every rank — roughly 100× more data. The two are computed the same
 > way (verified: same batches ⇒ same loss to four decimals), but they read different amounts of the
 > stream, and `evaluate.py` reads a *contiguous prefix* rather than a stride through it. That prefix
-> is not representative: measured on the 1.3B, eight disjoint 50-batch windows ranged 2.48–2.72 (EN)
+> is not representative: measured on `ko-1.3b-cpt-2b` over `data/korean/val_*`, eight disjoint
+> 50-batch windows ranged 2.48–2.72 (EN)
 > and 2.65–2.93 (KO), with the **first window the hardest in both languages**. So the default
 > 50-batch figure reads ~0.15 high; widening to 400 batches gives 2.58 / 2.78 against the training
 > run's 2.556 / 2.754. Raise `--max-batches` when you need a figure comparable to the curve.
@@ -798,10 +799,25 @@ pytest                 # everything
 pytest tests/test_kv_cache.py -v   # a subset
 ```
 
-Coverage: tokenizer round trip / single-id special tokens / vocab size, RoPE shape, offset, and
-determinism, GQA head mapping, causal masking, RMSNorm numerics, SwiGLU shapes, **weight tying
-(survives save/load)**, **KV-cache equivalence (cache on/off greedy outputs match)**, checkpoint
-resume, determinism, small overfit, and the scheduler's warmup/decay shape.
+Coverage by file:
+
+| File | Covers |
+|---|---|
+| `test_tokenizer.py` | round trip, single-id specials, vocab size, injection safety |
+| `test_rope.py` | shape, offset, determinism, **rejects sequences past `context_length`** |
+| `test_gqa.py` / `test_attention.py` | head mapping, causal masking, RMSNorm numerics, SwiGLU shapes |
+| `test_weight_tying.py` | tying survives save/load and appears once in the optimizer |
+| `test_kv_cache.py` | cache on/off greedy equivalence, chunked prefill, capacity errors |
+| `test_checkpoint_resume.py` | save/load/resume continues step-for-step |
+| `test_training.py` | small overfit, packing, `skip_blocks`, scheduler shape, `_train_step` |
+| `test_downstream.py` | batched scoring, padding non-leak, per-choice contexts, **chance correction**, trainer cadence |
+| `test_data_prepare.py` | holdout determinism/disjointness, manifest, 8 task formatters |
+| `test_configs.py` | all 20 YAMLs load, naming, uniqueness, unknown-key rejection |
+| `test_leaderboard.py` | ranking, column union, **mismatched-val-corpus warning**, CSV |
+| `test_sampling.py` / `test_determinism.py` | top-k/top-p, seeded reproducibility, grad-accum wiring |
+
+Known gaps (see [`docs/audit-2026-07.md`](docs/audit-2026-07.md)): no DDP/multi-GPU tests, no test
+for `run_training`, `Trainer._evaluate`, or `evaluation/language_modeling.py`.
 
 ---
 

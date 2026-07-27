@@ -64,6 +64,7 @@ def collect_rows(json_paths: list[str]) -> tuple[list[dict], list[str]]:
         task_names.update(tasks)
         agg = ds.get("aggregates") or {}
         lm_all = (data.get("language_modeling") or {}).get("all") or {}
+        prov = data.get("provenance") or {}
         rows.append({
             "model": _model_label(data, path),
             "params": (data.get("parameters") or {}).get("total"),
@@ -71,13 +72,38 @@ def collect_rows(json_paths: list[str]) -> tuple[list[dict], list[str]]:
             "en_avg": agg.get("en_avg"),
             "ko_avg": agg.get("ko_avg"),
             "overall_avg": agg.get("overall_avg"),
+            # Chance-corrected views. Raw averages mix 2-way and 4-way tasks, so
+            # they are not comparable across languages; these are.
+            "en_above": agg.get("en_above_chance"),
+            "ko_above": agg.get("ko_above_chance"),
+            "overall_above": agg.get("overall_above_chance"),
             "val_loss": lm_all.get("loss"),
             "val_ppl": lm_all.get("perplexity"),
+            # Which validation corpus produced val_loss. Rows measured on
+            # different corpora are not comparable and must not be read as a
+            # ranking; render_markdown flags that case.
+            "val_sources": tuple(prov.get("val_sources") or ()),
+            "max_batches": prov.get("max_batches"),
         })
 
     # Rank by overall accuracy, highest first; rows without a score sort last.
     rows.sort(key=lambda r: (r["overall_avg"] is not None, r["overall_avg"] or 0.0), reverse=True)
     return rows, sorted(task_names)
+
+
+def val_corpus_groups(rows: list[dict]) -> dict:
+    """Map each distinct validation corpus to the models measured on it.
+
+    A leaderboard whose ``val loss`` column spans more than one group is
+    comparing models on different data; the numbers in it cannot be ranked
+    against each other.
+    """
+
+    groups: dict = {}
+    for r in rows:
+        key = (r["val_sources"], r["max_batches"])
+        groups.setdefault(key, []).append(r["model"])
+    return groups
 
 
 def _pct(x) -> str:
@@ -89,30 +115,50 @@ def _num(x, digits: int) -> str:
 
 
 def render_markdown(rows: list[dict], task_names: list[str]) -> str:
-    header = ["Model", "Params", "Overall", "EN avg", "KO avg"] + task_names + ["val loss", "ppl"]
+    header = (
+        ["Model", "Params", "Overall", "EN avg", "KO avg", "EN +chance", "KO +chance"]
+        + task_names + ["val loss", "ppl"]
+    )
     lines = [
         "| " + " | ".join(header) + " |",
         "|" + "|".join(["---"] * len(header)) + "|",
     ]
     for r in rows:
         params = "–" if r["params"] is None else f"{r['params'] / 1e6:.1f}M"
-        cells = [r["model"], params, _pct(r["overall_avg"]), _pct(r["en_avg"]), _pct(r["ko_avg"])]
+        cells = [r["model"], params, _pct(r["overall_avg"]), _pct(r["en_avg"]), _pct(r["ko_avg"]),
+                 _pct(r["en_above"]), _pct(r["ko_above"])]
         cells += [_pct(r["tasks"].get(t)) for t in task_names]
         cells += [_num(r["val_loss"], 3), _num(r["val_ppl"], 1)]
         lines.append("| " + " | ".join(cells) + " |")
-    return "\n".join(lines) + "\n"
+    out = "\n".join(lines) + "\n"
+
+    # A split validation corpus makes the val-loss column meaningless as a
+    # ranking. Say so in the artifact rather than leaving the reader to notice.
+    groups = val_corpus_groups(rows)
+    if len(groups) > 1:
+        out += (
+            "\n> **⚠ `val loss` is not comparable across these rows** — they were measured on\n"
+            "> different validation corpora or sample sizes:\n>\n"
+        )
+        for (srcs, mb), models in groups.items():
+            src = ", ".join(srcs) if srcs else "(not recorded)"
+            out += f"> - `{src}` @ max_batches={mb}: {', '.join(models)}\n"
+    return out
 
 
 def write_csv(rows: list[dict], task_names: list[str], path: str) -> None:
-    cols = ["model", "params", "overall_avg", "en_avg", "ko_avg"] + task_names + ["val_loss", "val_ppl"]
+    cols = (["model", "params", "overall_avg", "en_avg", "ko_avg",
+             "en_above_chance", "ko_above_chance", "overall_above_chance"]
+            + task_names + ["val_loss", "val_ppl", "val_sources", "max_batches"])
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(cols)
         for r in rows:
             w.writerow(
-                [r["model"], r["params"], r["overall_avg"], r["en_avg"], r["ko_avg"]]
+                [r["model"], r["params"], r["overall_avg"], r["en_avg"], r["ko_avg"],
+                 r["en_above"], r["ko_above"], r["overall_above"]]
                 + [r["tasks"].get(t) for t in task_names]
-                + [r["val_loss"], r["val_ppl"]]
+                + [r["val_loss"], r["val_ppl"], ";".join(r["val_sources"]), r["max_batches"]]
             )
 
 

@@ -189,6 +189,9 @@ class Trainer:
         self.amp_dtype = torch.float16 if self.precision == "fp16" else torch.bfloat16
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.precision == "fp16")
         self.throughput = Throughput()
+        # Best-so-far per validation language, used to flag a "best" checkpoint
+        # whose aggregate improved only because one language carried the other.
+        self._best_per_lang: dict[str, float] = {}
 
     def _resolve_grad_accum(self) -> int:
         from kkoma.config import resolve_grad_accum
@@ -390,23 +393,39 @@ class Trainer:
 
         val_loss = results.get("val/loss", float("inf"))
         is_best = self.config.checkpoint.save_best and val_loss < self.state.best_val_loss
+
+        # The aggregate can improve while one language gets worse, and then that
+        # checkpoint is stored as "best". That is exactly what happened at the
+        # end of the 1.3B runs: the mixture ran out of English, the model spent
+        # its last steps on Korean only, and the Korean gain outvoted the English
+        # regression. Selecting on the aggregate is still defensible, but the
+        # trade has to be visible rather than hidden inside a mean.
+        per_lang_now = {
+            k.rsplit("_", 1)[-1]: v for k, v in results.items() if k.startswith("val/loss_")
+        }
+        regressed = sorted(
+            lang for lang, v in per_lang_now.items()
+            if v > self._best_per_lang.get(lang, float("inf"))
+        )
         if is_best:
             self.state.best_val_loss = val_loss
             self._save(step, tag="best_val")
+        for lang, v in per_lang_now.items():
+            self._best_per_lang[lang] = min(self._best_per_lang.get(lang, float("inf")), v)
 
         # Surface validation on the console (a key milestone) even when metrics
         # otherwise go to W&B. Main process only, so multi-GPU doesn't duplicate.
         if is_main_process():
-            per_lang = " ".join(
-                f"{k.split('_')[-1]} {v:.3f}"
-                for k, v in results.items()
-                if k.startswith("val/loss_")
-            )
+            per_lang = " ".join(f"{lang} {v:.3f}" for lang, v in per_lang_now.items())
             _console(
                 f"[eval @ step {step}] val/loss {val_loss:.4f} "
                 f"(ppl {results['val/perplexity']:.1f})"
                 + (f" | {per_lang}" if per_lang else "")
                 + ("  ← best" if is_best else "")
+                + (
+                    f"  ⚠ {'/'.join(regressed)} above its own best"
+                    if regressed and is_best else ""
+                )
             )
         self.model.train()
 
@@ -518,6 +537,11 @@ class Trainer:
                 "best_val_loss": self.state.best_val_loss,
                 "skipped_steps": self.state.skipped_steps,
                 "wandb_run_id": self.logger.run_id,
+                # Data sharding is world-size dependent, so a resume at a
+                # different world size reads a different slice of the stream.
+                # Recorded so scripts/_common.check_resume_compatibility can
+                # refuse rather than silently diverge.
+                "world_size": self.dist.world_size,
                 # Streaming data position (spec 18.1/18.3): tokens_processed is
                 # the position proxy; the flag records resume divergence.
                 "data_position": {

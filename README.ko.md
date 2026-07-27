@@ -569,7 +569,7 @@ python scripts/evaluate.py \
 > FP32로 로드됩니다). 학습과 학습 중 평가는 FP16 autocast를 씁니다(§10). 다만 실제로는 잃는 것도
 > 얻는 것도 측정되지 않습니다 — 1.3B에서 **동일한 배치**에 대해 FP16 autocast와 FP32의 validation
 > loss가 **소수점 4자리까지 일치**했습니다. 체크포인트는 `map_location="cpu"`로 읽어, 평가에서 쓰지
-> 않는 옵티마이저 상태(가중치의 약 2배)가 GPU에 올라가지 않게 합니다 — 1.3B의 V100 실측 피크는
+> 않는 옵티마이저 상태(가중치의 약 2배)가 GPU에 올라가지 않게 합니다 — 1.3B 체크포인트의 V100 실측 피크는
 > CUDA로 직접 로드할 때의 17.1GB가 아니라 **4.8GB**입니다.
 
 > **`language_modeling` 수치는 작은 표본입니다 — 학습 곡선과 직접 비교하지 마세요.**
@@ -577,7 +577,8 @@ python scripts/evaluate.py \
 > (1.3B 기준 약 102K)만 봅니다. 반면 학습 중 `val/loss`는 `training.eval_tokens`(기본 10M)를 모든
 > rank에 걸쳐 소비하므로 **약 100배 많은 데이터**를 읽습니다. 계산 방식은 동일하지만(검증됨: 같은
 > 배치면 소수점 4자리까지 같은 loss) 읽는 구간이 다르고, `evaluate.py`는 stride 없이 **앞부분 연속
-> 구간**만 읽습니다. 그 앞부분은 대표성이 없습니다 — 1.3B 실측에서 서로 겹치지 않는 50배치 창 8개가
+> 구간**만 읽습니다. 그 앞부분은 대표성이 없습니다 — `ko-1.3b-cpt-2b`를 `data/korean/val_*`에서 잰
+> 결과 서로 겹치지 않는 50배치 창 8개가
 > EN 2.48~2.72, KO 2.65~2.93로 흩어졌고 **두 언어 모두 첫 창이 가장 어려웠습니다**. 그래서 기본
 > 50배치 값은 약 +0.15 높게 나옵니다. 400배치로 넓히면 2.58 / 2.78로, 학습 실행의 2.556 / 2.754에
 > 근접합니다. 곡선과 비교 가능한 수치가 필요하면 `--max-batches`를 올리세요.
@@ -763,10 +764,25 @@ pytest                 # 전체
 pytest tests/test_kv_cache.py -v   # 일부만
 ```
 
-커버리지: 토크나이저 round-trip / 특수토큰 단일 ID / vocab 크기, RoPE shape·offset·결정성,
-GQA head 매핑, causal masking, RMSNorm 수치, SwiGLU shape, **weight tying(저장·로드 후 유지)**,
-**KV cache 동치(cache on/off greedy 결과 일치)**, 체크포인트 resume, 결정성, 소형 overfit,
-스케줄러 warmup/decay 형태.
+파일별 커버리지:
+
+| 파일 | 내용 |
+|---|---|
+| `test_tokenizer.py` | round-trip, 특수토큰 단일 ID, vocab 크기, 특수토큰 주입 방어 |
+| `test_rope.py` | shape·offset·결정성, **`context_length` 초과 시퀀스 거부** |
+| `test_gqa.py` / `test_attention.py` | head 매핑, causal masking, RMSNorm 수치, SwiGLU shape |
+| `test_weight_tying.py` | 저장·로드 후 tying 유지, 옵티마이저에 1회만 등장 |
+| `test_kv_cache.py` | cache on/off greedy 동치, chunked prefill, 용량 초과 에러 |
+| `test_checkpoint_resume.py` | 저장·로드·resume이 스텝 단위로 이어짐 |
+| `test_training.py` | 소형 overfit, packing, `skip_blocks`, 스케줄러 형태, `_train_step` |
+| `test_downstream.py` | 배치 채점, 패딩 비누출, 선택지별 문맥, **chance 보정**, 트레이너 주기 |
+| `test_data_prepare.py` | holdout 결정성·분리, manifest, 태스크 포맷터 8종 |
+| `test_configs.py` | YAML 20개 로드, 명명 규칙, 유일성, 미지 키 거부 |
+| `test_leaderboard.py` | 순위, 컬럼 합집합, **검증 코퍼스 불일치 경고**, CSV |
+| `test_sampling.py` / `test_determinism.py` | top-k/top-p, 시드 재현성, grad-accum 배선 |
+
+알려진 공백([`docs/audit-2026-07.md`](docs/audit-2026-07.md) 참고): DDP·멀티GPU 테스트 없음,
+`run_training`·`Trainer._evaluate`·`evaluation/language_modeling.py` 무테스트.
 
 ---
 

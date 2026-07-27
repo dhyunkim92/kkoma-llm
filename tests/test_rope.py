@@ -41,6 +41,28 @@ def test_rope_extends_cache():
     assert cos.shape == (32, 8)
 
 
+def test_model_rejects_sequences_past_context_length():
+    """RoPE extends its table on demand, so nothing else stops extrapolation.
+
+    Before this guard a forward past context_length ran to completion and
+    returned confident nonsense; only generate() checked the bound.
+    """
+
+    import pytest
+
+    from kkoma.model.model import KkomaModel
+    from tests.conftest import tiny_config
+
+    cfg = tiny_config(context_length=32)
+    model = KkomaModel(cfg).eval()
+    ok = torch.randint(0, cfg.vocab_size, (1, cfg.context_length))
+    model(ok)  # exactly at the limit is fine
+
+    too_long = torch.randint(0, cfg.vocab_size, (1, cfg.context_length + 1))
+    with pytest.raises(ValueError, match="exceeds context_length"):
+        model(too_long)
+
+
 def test_rotation_preserves_norm():
     """RoPE is a rotation, so per-position vector norms are preserved."""
 

@@ -45,6 +45,16 @@ def _buffer_shuffle(docs: Iterator[str], seed: int, buffer_size: int) -> Iterato
 
 def _shard_files(path: str, seed: Optional[int]) -> list[str]:
     files = sorted(glob.glob(path))
+    if not files:
+        # A glob that matches nothing is a missing prepare step or a stale path,
+        # never a legitimate empty corpus. Left alone it produces an empty
+        # stream: training would start and immediately stop on "data stream
+        # exhausted", and validation would report a NaN loss — both a long way
+        # from the actual cause.
+        raise FileNotFoundError(
+            f"no files matched {path!r}; run the matching scripts/prepare_*_data.py "
+            "or fix the path in the config"
+        )
     if seed is not None:
         random.Random(seed).shuffle(files)
     return files

@@ -114,3 +114,65 @@ def test_optimizer_state_present_after_save(tmp_path):
     save_checkpoint(path, model, opt, None, None, global_step=1, tokens_processed=1, config_dict={})
     ckpt = torch.load(path, weights_only=False)
     assert "optimizer" in ckpt and ckpt["optimizer"]["state"]
+
+
+# ---------------------------------------------------------------------------
+# Resume geometry compatibility (docs/audit-2026-07.md B-4)
+# ---------------------------------------------------------------------------
+
+
+def _ckpt_payload(world_size=2, micro_batch=4, context_length=128):
+    from kkoma.config import RunConfig
+
+    cfg = RunConfig()
+    cfg.training.micro_batch_size = micro_batch
+    cfg.model.context_length = context_length
+    return {"config": cfg.to_dict(), "world_size": world_size, "global_step": 10}
+
+
+def test_resume_rejects_changed_world_size():
+    """Blocks shard by ``i % world_size``, so a different world size resumes at a
+    different corpus position even though skip_blocks looks right."""
+
+    import pytest
+
+    from kkoma.config import RunConfig
+    from scripts._common import check_resume_compatibility
+
+    cfg = RunConfig()
+    cfg.training.micro_batch_size = 4
+    cfg.model.context_length = 128
+    with pytest.raises(ValueError, match="world_size"):
+        check_resume_compatibility(_ckpt_payload(world_size=2), cfg, world_size=4)
+
+
+def test_resume_rejects_changed_batch_geometry():
+    import pytest
+
+    from kkoma.config import RunConfig
+    from scripts._common import check_resume_compatibility
+
+    cfg = RunConfig()
+    cfg.training.micro_batch_size = 8      # checkpoint saved with 4
+    cfg.model.context_length = 128
+    with pytest.raises(ValueError, match="micro_batch_size"):
+        check_resume_compatibility(_ckpt_payload(world_size=2), cfg, world_size=2)
+
+
+def test_resume_accepts_matching_geometry():
+    from kkoma.config import RunConfig
+    from scripts._common import check_resume_compatibility
+
+    cfg = RunConfig()
+    cfg.training.micro_batch_size = 4
+    cfg.model.context_length = 128
+    check_resume_compatibility(_ckpt_payload(world_size=2), cfg, world_size=2)
+
+
+def test_resume_allows_checkpoint_without_config():
+    """Older checkpoints carry no config; nothing to compare, so do not block."""
+
+    from kkoma.config import RunConfig
+    from scripts._common import check_resume_compatibility
+
+    check_resume_compatibility({"global_step": 5}, RunConfig(), world_size=8)

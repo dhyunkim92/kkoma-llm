@@ -82,7 +82,8 @@ def build_train_loader(
     config: RunConfig, tokenizer: KkomaTokenizer, dist: DistInfo, skip_blocks: int = 0
 ) -> DataLoader:
     clean = CleanConfig(min_chars=config.data.min_doc_chars)
-    stream = MixtureStream(config.data.sources, seed=config.data.sampling_seed, clean_config=clean)
+    stream = MixtureStream(config.data.sources, seed=config.data.sampling_seed, clean_config=clean,
+                           weighting=config.data.mixture_weighting)
     dataset = PackedDataset(
         documents=stream,
         tokenizer=tokenizer,
@@ -122,7 +123,8 @@ def build_val_loaders(
     clean = CleanConfig(min_chars=config.data.min_doc_chars)
     loaders = {}
     for lang, sources in by_lang.items():
-        stream = MixtureStream(sources, seed=config.data.sampling_seed, clean_config=clean)
+        stream = MixtureStream(sources, seed=config.data.sampling_seed, clean_config=clean,
+                               weighting=config.data.mixture_weighting)
         dataset = PackedDataset(
             stream, tokenizer, config.model.context_length,
             rank=rank, world_size=world_size,
@@ -190,6 +192,52 @@ def maybe_wrap_ddp(model: KkomaModel, dist: DistInfo, config: RunConfig):
     )
 
 
+def check_resume_compatibility(ckpt: dict, config: RunConfig, world_size: int) -> None:
+    """Refuse a resume whose data geometry differs from the saved run.
+
+    ``PackedDataset`` assigns block ``i`` to shard ``i % (world_size * workers)``
+    and ``skip_blocks`` is recomputed from the *current* geometry, so changing
+    world size, micro-batch, context length, or the global batch silently lands
+    the resumed run at a different corpus position than the one it left. The
+    config is stored in every checkpoint, so this is checkable — it just was not
+    being checked (docs/audit-2026-07.md §B-4).
+
+    Model shape mismatches are caught later by ``load_state_dict``, but with a
+    tensor-shape error rather than an explanation, so they are checked here too.
+    """
+
+    saved = ckpt.get("config")
+    if not saved:
+        return  # pre-provenance checkpoint; nothing to compare against
+
+    def _get(section: str, key: str):
+        return (saved.get(section) or {}).get(key)
+
+    problems = []
+    geometry = [
+        ("training", "micro_batch_size", config.training.micro_batch_size),
+        ("training", "global_batch_tokens", config.training.global_batch_tokens),
+        ("training", "grad_accum_steps", config.training.grad_accum_steps),
+        ("model", "context_length", config.model.context_length),
+    ]
+    for section, key, now in geometry:
+        was = _get(section, key)
+        if was is not None and was != now:
+            problems.append(f"{section}.{key}: checkpoint {was} vs current {now}")
+
+    saved_world = ckpt.get("world_size")
+    if saved_world is not None and saved_world != world_size:
+        problems.append(f"world_size: checkpoint {saved_world} vs current {world_size}")
+
+    if problems:
+        raise ValueError(
+            "resume would read a different slice of the data stream than the "
+            "saved run did:\n  " + "\n  ".join(problems)
+            + "\nRe-run with the original geometry, or set "
+            "training.resume_fastforward: false to accept a restarted stream."
+        )
+
+
 def run_training(
     config: RunConfig,
     resume_path: Optional[str] = None,
@@ -245,6 +293,7 @@ def run_training(
                 "(refusing to silently restart from step 0)"
             )
         ckpt = read_checkpoint(resume_path, map_location=str(device))
+        check_resume_compatibility(ckpt, config, dist.world_size)
         if ckpt.get("wandb_run_id") and not config.logging.wandb_run_id:
             config.logging.wandb_run_id = ckpt["wandb_run_id"]
         if config.training.resume_fastforward:

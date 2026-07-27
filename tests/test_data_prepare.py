@@ -6,6 +6,8 @@ import json
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from kkoma.config import DataSource
@@ -84,6 +86,61 @@ def test_manifest_records_split_method(tmp_path):
     assert manifest["holdout"]["holdout_mod"] == 10
     assert "sha256" in manifest["holdout"]["method"]
     assert manifest["shuffle"] == {"seed": 7, "buffer_size": 32}
+
+
+def _uniform_length_source(tmp_path, name, char_len, n_docs):
+    path = tmp_path / f"{name}.jsonl"
+    with open(path, "w", encoding="utf-8") as f:
+        for _ in range(n_docs):
+            f.write(json.dumps({"text": "가" * char_len}, ensure_ascii=False) + "\n")
+    return DataSource(name=name, path=str(path), weight=0.5)
+
+
+def _realized_ratio(stream, take):
+    by_len = {}
+    for i, doc in enumerate(stream):
+        if i >= take:
+            break
+        by_len[len(doc)] = by_len.get(len(doc), 0) + len(doc)
+    total = sum(by_len.values())
+    return {k: v / total for k, v in by_len.items()}
+
+
+def test_document_weighting_misses_the_token_target(tmp_path):
+    """The pre-2026-07 behaviour, kept for reproducing the shipped runs.
+
+    Equal per-document weights over sources with 1:4 document lengths give a 1:4
+    token split, not 1:1 — which is how the 1.3B CPT run's 70/30 target was
+    realized as 64/36 (docs/audit-2026-07.md §A-3).
+    """
+
+    srcs = [_uniform_length_source(tmp_path, "short", 100, 4000),
+            _uniform_length_source(tmp_path, "long", 400, 4000)]
+    ratio = _realized_ratio(MixtureStream(srcs, seed=42, weighting="document"), 4000)
+    assert ratio[100] == pytest.approx(0.2, abs=0.03)
+    assert ratio[400] == pytest.approx(0.8, abs=0.03)
+
+
+def test_token_weighting_hits_the_token_target(tmp_path):
+    """Default weighting makes the configured ratio mean tokens, as documented."""
+
+    srcs = [_uniform_length_source(tmp_path, "short", 100, 4000),
+            _uniform_length_source(tmp_path, "long", 400, 4000)]
+    ratio = _realized_ratio(MixtureStream(srcs, seed=42, weighting="token"), 4000)
+    assert ratio[100] == pytest.approx(0.5, abs=0.03)
+    assert ratio[400] == pytest.approx(0.5, abs=0.03)
+
+
+def test_missing_glob_raises_instead_of_yielding_nothing(tmp_path):
+    """A path that matches no files is a config error, not an empty corpus.
+
+    Silently returning an empty stream sent training straight to "data stream
+    exhausted" and validation to NaN, both far from the cause.
+    """
+
+    src = DataSource(name="gone", path=str(tmp_path / "does_not_exist" / "*.jsonl"))
+    with pytest.raises(FileNotFoundError, match="no files matched"):
+        list(MixtureStream([src], seed=1))
 
 
 # ---------------------------------------------------------------------------

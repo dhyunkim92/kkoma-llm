@@ -719,7 +719,7 @@ d_model: 1,024
 n_head: 16
 n_kv_head: 4 또는 16
 head_dim: 64
-d_ff: SwiGLU 기준 약 2,752
+d_ff: SwiGLU 기준 2,816 (`8/3 x d_model`를 128의 배수로 올림)
 context_length: 1,024
 vocab_size: 32,768
 ```
@@ -1212,15 +1212,30 @@ Base 모델에 적합한 zero-shot 평가를 학습 도중 주기적으로 측�
 length-normalized continuation log-likelihood 방식이다. 각 선택지의 `log p(선택지 | 문맥)`을
 토큰 수로 나눈 뒤 가장 높은 것을 예측으로 삼는다(lm-evaluation-harness의 `acc_norm`과 동일).
 
-현재 태스크:
+태스크는 12개이며, 각 태스크의 `DownstreamTask.during_training` 플래그가 채점 시점을 가른다.
+
+**학습 중 + 최종** (가벼운 3개, `during_training: true`)
 
 - HellaSwag (validation split, 영어): 상식 추론
 - ARC-Easy (test split, 영어): 과학 상식 4지선다
 - KoBEST-HellaSwag (test split, 한국어): 한국어 상식 추론
 
-세 태스크 모두 문항 수를 500개로 맞춘다. HellaSwag은 정답 label 0~3별로 125개씩
-stratified sampling하고, KoBEST는 test split 전체가 정확히 500개라 그대로 쓴다. ARC-Easy는
+**최종 평가 전용** (`during_training: false`, `scripts/evaluate.py`에서만 채점)
+
+- 영어: PIQA, ARC-Challenge, BoolQ, WinoGrande, OpenBookQA
+- 한국어: KoBEST-COPA, KoBEST-BoolQ, KoBEST-SentiNeg, KoBEST-WiC
+
+학습 루프는 3개만 돌려 주기를 가볍게 유지하고, 학습이 끝난 뒤 `scripts/evaluate.py`가 활성화된
+12개 전부를 한 번 채점한다.
+
+문항 수는 태스크당 최대 500개로 맞춘다. HellaSwag은 정답 label 0~3별로 125개씩 stratified
+sampling하고, KoBEST-HellaSwag은 test split 전체가 정확히 500개라 그대로 쓴다. ARC 계열은
 원본 선택지 구성(대부분 4지선다, 일부 3·5지선다)을 변형하지 않고 500개를 무작위 추출한다.
+KoBEST-SentiNeg은 test split이 397개라 전체를 쓴다.
+
+WinoGrande만 채점 형태가 다르다. 각 선택지가 문장의 `_` 빈칸을 채워 **선택지별 문맥**을 만들고,
+빈칸 뒤 공통 접미사를 그 문맥 각각에 조건부로 채점한다(lm-evaluation-harness의 partial 방식).
+그래서 이 레코드만 `contexts` 필드를 가진다.
 
 샘플링은 `prepare_downstream_data.py`에서 한 번만 수행해 JSONL로 고정한다(§14.5). 이후 모든
 평가는 같은 문항을 채점하므로 스텝 간·모델 크기 간 곡선이 서로 비교 가능하다. seed 42와 데이터셋
@@ -1233,19 +1248,27 @@ revision을 함께 고정하므로 원본을 지우고 다시 만들어도 동�
 다만 500문항 accuracy는 standard error가 약 2%라 스텝 간 변동이 크므로, 절대값보다 여러 스텝에
 걸친 추세로 읽는다.
 
-태스크마다 세 지표를 기록한다.
+태스크마다 다음 지표를 기록한다.
 
 - `acc_norm`: 위 정확도
+- `chance`: 그 태스크의 무작위 추측 정확도(문항별 `1/선택지수`의 평균). 스위트가 2지선다와
+  4지선다를 섞고 있어 raw accuracy는 태스크 간 비교가 불가능하다.
+- `above_chance`: `acc_norm - chance`
+- `se`: 이 문항 수에서의 이항 표준오차. `2*se`가 단일 태스크 비교의 노이즈 바닥이다.
 - `margin_max`: 정답 logprob에서 가장 강한 오답을 뺀 값. 정답을 맞힐 때만 양수라 부호가
   곧 정오답이다.
 - `margin_mean`: 정답 logprob에서 오답 평균을 뺀 값. 정답이 뒤집히기 전부터 연속적으로
   움직이므로, accuracy가 chance에 붙어 있는 초반에도 학습 여부를 볼 수 있다.
 
-집계 지표도 함께 남긴다.
+집계 지표도 함께 남긴다. 언어별로 `{lang}_avg`(raw 평균), `{lang}_chance`, `{lang}_above_chance`,
+`{lang}_normalized`(`above_chance / (1 - chance)`), `{lang}_n_tasks`를 남기고 `overall_*`도 같은
+형태로 남긴다.
 
-- `downstream/en_avg`: HellaSwag·ARC-Easy accuracy 평균
-- `downstream/ko_avg`: KoBEST-HellaSwag accuracy
-- `downstream/overall_avg`: 세 태스크 accuracy의 단순 평균
+**raw 평균만 보면 안 된다.** 영어 스위트는 4지선다 위주(chance ≈ 0.357)이고 한국어 스위트는
+2지선다 위주(chance ≈ 0.450)라, raw 평균은 그 언어에 이진 태스크가 몇 개 들어 있느냐에 따라
+바닥이 달라진다. 1.3B 실측에서 raw는 `ko_avg` 0.507 ≳ `en_avg` 0.496이었지만 chance를 빼면
+영어 +0.139 vs 한국어 +0.057로 영어가 2.4배 강하다. 언어 간·모델 간 비교에는 `above_chance`를
+쓴다.
 
 작은 모델의 benchmark 절대 점수보다 모델 크기 및 단계별 변화에 초점을 둔다. 특히 이 규모(tpp
 ~10)에서 HellaSwag은 오래 chance(25%) 근처에 머무르고, KoBEST는 Base가 한국어를 5%만 보므로
@@ -1327,8 +1350,10 @@ val/perplexity
 train/learning_rate
 train/grad_norm
 train/tokens_per_second
-train/step_time
-system/gpu_memory
+train/scaler_scale
+train/skipped_steps
+system/allocated_mb
+system/reserved_mb
 progress/tokens_processed
 progress/global_step
 ```

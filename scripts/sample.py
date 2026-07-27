@@ -1,7 +1,7 @@
 """Generate text from a checkpoint.
 
     python scripts/sample.py \
-        --checkpoint artifacts/checkpoints/base_125m/final.pt \
+        --checkpoint artifacts/checkpoints/base-125m/final.pt \
         --config configs/pretraining/base_125m.yaml \
         --prompt "In the future, small language models" \
         --max-new-tokens 100 --temperature 0.8 --top-k 50

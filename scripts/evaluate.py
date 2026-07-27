@@ -2,7 +2,7 @@
 generation samples.
 
     python scripts/evaluate.py \
-        --checkpoint artifacts/checkpoints/base_125m/final.pt \
+        --checkpoint artifacts/checkpoints/base-125m/final.pt \
         --config configs/pretraining/base_125m.yaml \
         --output artifacts/evaluation/base_125m.json
 
@@ -44,9 +44,18 @@ def main() -> None:
     parser.add_argument("--no-generation", action="store_true")
     parser.add_argument("--no-downstream", action="store_true",
                         help="skip the downstream benchmark pass")
+    parser.add_argument("--val-from", metavar="CONFIG", default=None,
+                        help="take data.val_sources from this config instead of --config, "
+                             "so several models can be scored on one fixed corpus")
     args = parser.parse_args()
 
     config = RunConfig.from_yaml(args.config)
+    # A model's own config names the corpus it trained against, which is not
+    # necessarily one that still exists or that its peers were measured on.
+    # Comparing val losses across corpora is meaningless, so allow pinning the
+    # evaluation corpus independently of the training config.
+    if args.val_from:
+        config.data.val_sources = RunConfig.from_yaml(args.val_from).data.val_sources
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     t0 = section(f"loading checkpoint on {device}")
@@ -69,6 +78,18 @@ def main() -> None:
         "run_name": config.project.run_name,  # leaderboard label (scripts/leaderboard.py)
         "checkpoint": args.checkpoint,
         "parameters": params,
+        # Which data these numbers came from. Without this a leaderboard row is
+        # not interpretable: two models evaluated on different validation
+        # corpora are not comparable, and the config that names the corpus can
+        # be edited (or its files deleted) long after the JSON is written.
+        "provenance": {
+            "config": args.config,
+            "val_sources": [s.path for s in config.data.val_sources],
+            "max_batches": args.max_batches,
+            "downstream_paths": [
+                t.path for t in config.evaluation.downstream_tasks if t.enabled
+            ],
+        },
     }
 
     # ---- validation loss (EN / KO) ----------------------------------------
@@ -90,7 +111,8 @@ def main() -> None:
 
             def _on_task(name, language, r):
                 line(f"{name:<20} [{language}] acc_norm {r['acc_norm']:.3f}"
-                      f"  (margin {r['margin_mean']:+.3f}, n={r['n']})")
+                      f"  chance {r['chance']:.3f}  above {r['above_chance']:+.3f}"
+                      f"  ±2σ {2 * r['se']:.3f}  (n={r['n']})")
 
             results["downstream"] = evaluate_downstream_suite(
                 model, tokenizer, tasks, device,
@@ -98,7 +120,11 @@ def main() -> None:
                 on_task=_on_task,
             )
             agg = results["downstream"]["aggregates"]
-            line("→ " + "  ".join(f"{k} {v:.3f}" for k, v in agg.items()))
+            for lang in ("en", "ko", "overall"):
+                if f"{lang}_avg" in agg:
+                    line(f"→ {lang:<7} avg {agg[f'{lang}_avg']:.3f}"
+                         f"  (chance {agg[f'{lang}_chance']:.3f},"
+                         f" above {agg[f'{lang}_above_chance']:+.3f})")
             done(t0)
         else:
             print("\n▸ downstream benchmarks … skipped")

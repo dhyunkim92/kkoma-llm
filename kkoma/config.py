@@ -124,6 +124,11 @@ class DataConfig:
     sources: list[DataSource] = field(default_factory=list)
     sampling_seed: int = 42
     min_doc_chars: int = 16
+    # What the source weights are a ratio of. "token" (default) makes 95/5 and
+    # 70/30 mean what they say; "document" is the literal draw probability and
+    # reproduces the pre-2026-07 runs, whose 70/30 target realized as 64/36 in
+    # tokens (docs/audit-2026-07.md §A-3).
+    mixture_weighting: str = "token"
     # Validation holdout produced from the same pipeline.
     val_sources: list[DataSource] = field(default_factory=list)
 
@@ -269,7 +274,44 @@ class RunConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RunConfig":
-        return _from_dict(cls, data)
+        cfg = _from_dict(cls, data)
+        cfg.validate()
+        return cfg
+
+    def validate(self) -> None:
+        """Reject values that would otherwise change the experiment silently.
+
+        These fields are all dispatched on by string comparison, so a typo does
+        not raise — it falls through to a different branch. ``precision:
+        float16`` (instead of ``fp16``) leaves ``use_amp`` False and trains the
+        whole run in FP32; ``backend: wanb`` logs to the console for hours. An
+        architecture study that changes one component at a time cannot absorb
+        that, so the mismatch has to surface at config-load time.
+        """
+
+        allowed = {
+            "training.precision": (self.training.precision, {"fp16", "bf16", "fp32"}),
+            "model.norm": (self.model.norm, {"rmsnorm", "layernorm"}),
+            "model.positional_encoding": (
+                self.model.positional_encoding, {"rope", "learned"},
+            ),
+            "model.activation": (self.model.activation, {"swiglu", "gelu"}),
+            "optimizer.name": (self.optimizer.name, {"adamw"}),
+            "scheduler.name": (self.scheduler.name, {"cosine"}),
+            "logging.backend": (self.logging.backend, {"wandb", "none"}),
+            "data.mixture_weighting": (self.data.mixture_weighting, {"token", "document"}),
+        }
+        for key, (value, options) in allowed.items():
+            if value not in options:
+                raise ValueError(
+                    f"{key}={value!r} is not one of {sorted(options)}"
+                )
+        for task in self.evaluation.downstream_tasks:
+            if task.language not in {"en", "ko"}:
+                raise ValueError(
+                    f"downstream task {task.name!r} has language={task.language!r}; "
+                    "expected 'en' or 'ko' (it drives the en_avg / ko_avg aggregates)"
+                )
 
     @classmethod
     def from_yaml(cls, path: str) -> "RunConfig":
@@ -331,6 +373,22 @@ def _coerce(hint: Any, value: Any) -> Any:
             return [
                 _from_dict(elem_type, v) if isinstance(v, dict) else v for v in value
             ]
+        return value
+    # Scalars: YAML 1.1 does not recognize unquoted scientific notation, so
+    # `learning_rate: 6e-4` arrives as the string '6e-4' and would silently
+    # travel all the way into the optimizer. Cast to the annotated type instead.
+    # Optional[T] is unwrapped; bool is left alone (bool is a subclass of int,
+    # and int("true") is not what anyone means).
+    target = hint
+    args = typing.get_args(hint)
+    if args:  # Optional[T] / Union[T, None]
+        non_none = [a for a in args if a is not type(None)]
+        target = non_none[0] if len(non_none) == 1 else None
+    if target in (int, float) and isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        try:
+            return target(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"expected {target.__name__}, got {value!r}") from None
     return value
 
 

@@ -13,6 +13,7 @@ size and training stage, so these helpers focus on consistent measurement.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 
 import torch
@@ -211,7 +212,11 @@ def evaluate_task(
     model.eval()
     scores = score_choices(model, tokenizer, examples, device, batch_size=batch_size)
 
-    acc = torch.zeros(4, device=device)  # [correct, margin_max, margin_mean, n]
+    # [correct, margin_max, margin_mean, n, chance]. ``chance`` rides along in the
+    # same tensor so the DDP reduce covers it too: choice counts vary per question
+    # (ARC ships 3-, 4- and 5-way items), so a rank's shard has its own chance
+    # level and only the summed version is meaningful.
+    acc = torch.zeros(5, device=device)
     for ex, row in zip(examples, scores):
         gold = row[ex.label]
         others = [s for i, s in enumerate(row) if i != ex.label]
@@ -221,18 +226,30 @@ def evaluate_task(
         acc[1] += gold - max(others)
         acc[2] += gold - (sum(others) / len(others))
         acc[3] += 1.0
+        acc[4] += 1.0 / len(row)
 
     if reduce_fn is not None:
         acc = reduce_fn(acc)
     n = acc[3].item()
     if n == 0:
         return {"acc_norm": float("nan"), "margin_max": float("nan"),
-                "margin_mean": float("nan"), "n": 0}
+                "margin_mean": float("nan"), "n": 0,
+                "chance": float("nan"), "above_chance": float("nan")}
+    acc_norm = acc[0].item() / n
+    chance = acc[4].item() / n
     return {
-        "acc_norm": acc[0].item() / n,
+        "acc_norm": acc_norm,
+        # Random-guess accuracy for this task. Reported because the suite mixes
+        # 2-way and 4-way tasks, so raw accuracies are not comparable across
+        # tasks and a plain average of them is anchored by the 2-way ones.
+        "chance": chance,
+        "above_chance": acc_norm - chance,
         "margin_max": acc[1].item() / n,
         "margin_mean": acc[2].item() / n,
         "n": int(n),
+        # Binomial standard error at this n; 2*se is the rough noise floor on
+        # any single-task comparison.
+        "se": math.sqrt(max(acc_norm * (1.0 - acc_norm), 0.0) / n) if n else float("nan"),
     }
 
 
@@ -258,26 +275,47 @@ def evaluate_downstream_suite(
     """
 
     per_task: dict = {}
-    by_lang: dict[str, list[float]] = {}
+    by_lang: dict[str, list[dict]] = {}
     for name, language, examples in tasks:
         r = evaluate_task(
             model, tokenizer, examples, device,
             batch_size=batch_size, reduce_fn=reduce_fn,
         )
         per_task[name] = {"language": language, **r}
-        by_lang.setdefault(language, []).append(r["acc_norm"])
+        by_lang.setdefault(language, []).append(r)
         if on_task is not None:
             on_task(name, language, r)
 
     def _mean(xs: list[float]) -> float:
         return sum(xs) / len(xs) if xs else float("nan")
 
+    def _agg(rs: list[dict]) -> dict:
+        """Raw mean plus the chance-corrected views.
+
+        ``*_avg`` alone is not comparable across languages here: the EN suite is
+        mostly 4-way (chance ~0.36) while the KO suite is mostly 2-way (chance
+        ~0.45), so a raw average is anchored by how many binary tasks a language
+        happens to contain. ``*_above_chance`` subtracts that floor and
+        ``*_normalized`` rescales it to [0, 1] of the available headroom.
+        """
+        return {
+            "avg": _mean([r["acc_norm"] for r in rs]),
+            "chance": _mean([r["chance"] for r in rs]),
+            "above_chance": _mean([r["above_chance"] for r in rs]),
+            "normalized": _mean(
+                [r["above_chance"] / (1.0 - r["chance"]) for r in rs if r["chance"] < 1.0]
+            ),
+            "n_tasks": len(rs),
+        }
+
     aggregates: dict = {}
-    if "en" in by_lang:
-        aggregates["en_avg"] = _mean(by_lang["en"])
-    if "ko" in by_lang:
-        aggregates["ko_avg"] = _mean(by_lang["ko"])
-    aggregates["overall_avg"] = _mean([a for accs in by_lang.values() for a in accs])
+    for lang in ("en", "ko"):
+        if lang in by_lang:
+            for k, v in _agg(by_lang[lang]).items():
+                aggregates[f"{lang}_{k}" if k != "avg" else f"{lang}_avg"] = v
+    every = [r for rs in by_lang.values() for r in rs]
+    for k, v in _agg(every).items():
+        aggregates[f"overall_{k}" if k != "avg" else "overall_avg"] = v
     return {"tasks": per_task, "aggregates": aggregates}
 
 

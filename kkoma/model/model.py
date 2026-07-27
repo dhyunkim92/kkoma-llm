@@ -85,6 +85,17 @@ class KkomaModel(nn.Module):
         offset = cache.seq_len if cache is not None else 0
         if cache is not None:
             cache.check_capacity(t)
+        # RoPE grows its table on demand and learned embeddings index straight
+        # into theirs, so without this the model happily runs past the length it
+        # was trained on and returns confident nonsense. A KVCache built through
+        # new_cache() catches this above, but the uncached path (scoring, a
+        # plain forward) has no other guard.
+        if offset + t > self.config.context_length:
+            raise ValueError(
+                f"sequence of {offset + t} tokens exceeds context_length "
+                f"{self.config.context_length}; positions beyond it were never "
+                "trained and extrapolate silently"
+            )
 
         x = self.token_embedding(input_ids)
 

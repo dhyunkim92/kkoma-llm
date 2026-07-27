@@ -86,9 +86,11 @@ def test_right_padding_does_not_leak(model, tiny_tokenizer, device):
     """
 
     short = MultipleChoiceExample(context="이 모델은", choices=[" scratch."], label=0)
+    # Long enough to force padding on `short`, short enough to stay inside the
+    # fixture model's 128-token context (the model rejects anything past it).
     long = MultipleChoiceExample(
-        context="The model is trained from scratch. Artificial intelligence can do many things.",
-        choices=[" 처음부터 직접 학습되었습니다. Kkoma-LLM은 영어와 한국어를 모두 처리합니다."],
+        context="The model is trained from scratch.",
+        choices=[" 처음부터 직접 학습되었습니다."],
         label=0,
     )
 
@@ -315,12 +317,50 @@ def test_downstream_suite_aggregates_by_language(model, tiny_tokenizer, device, 
 
     assert set(out["tasks"]) == {"hellaswag", "kobest_boolq"}
     agg = out["aggregates"]
-    assert set(agg) == {"en_avg", "ko_avg", "overall_avg"}
     en = out["tasks"]["hellaswag"]["acc_norm"]
     ko = out["tasks"]["kobest_boolq"]["acc_norm"]
     assert agg["en_avg"] == pytest.approx(en, abs=1e-6)
     assert agg["ko_avg"] == pytest.approx(ko, abs=1e-6)
     assert agg["overall_avg"] == pytest.approx((en + ko) / 2, abs=1e-6)
+
+
+def test_task_reports_chance_from_actual_choice_counts(model, tiny_tokenizer, device):
+    """Chance is the mean of 1/n_choices, not a constant.
+
+    The suite mixes 2-way and 4-way tasks, so a raw accuracy average is anchored
+    by however many binary tasks a language happens to contain. Reporting the
+    per-task chance is what makes the languages comparable.
+    """
+
+    two_way = [MultipleChoiceExample(context="q", choices=[" a", " b"], label=0)] * 4
+    four_way = [MultipleChoiceExample(context="q", choices=[" a", " b", " c", " d"], label=0)] * 4
+    mixed = two_way[:2] + four_way[:2]
+
+    r2 = evaluate_task(model, tiny_tokenizer, two_way, device, batch_size=8)
+    r4 = evaluate_task(model, tiny_tokenizer, four_way, device, batch_size=8)
+    rm = evaluate_task(model, tiny_tokenizer, mixed, device, batch_size=8)
+    assert r2["chance"] == pytest.approx(0.5)
+    assert r4["chance"] == pytest.approx(0.25)
+    assert rm["chance"] == pytest.approx(0.375)  # ragged tasks average their own floors
+    assert r2["above_chance"] == pytest.approx(r2["acc_norm"] - 0.5)
+
+
+def test_suite_aggregates_expose_chance_corrected_views(model, tiny_tokenizer, device):
+    """A language whose tasks are mostly binary must not look stronger for it."""
+
+    binary = [MultipleChoiceExample(context="q", choices=[" a", " b"], label=0)] * 4
+    quad = [MultipleChoiceExample(context="q", choices=[" a", " b", " c", " d"], label=0)] * 4
+    out = evaluate_downstream_suite(
+        model, tiny_tokenizer, [("t_en", "en", quad), ("t_ko", "ko", binary)],
+        device, batch_size=8,
+    )
+    agg = out["aggregates"]
+    assert agg["en_chance"] == pytest.approx(0.25)
+    assert agg["ko_chance"] == pytest.approx(0.50)
+    # The corrected view is the raw average minus that language's own floor.
+    assert agg["en_above_chance"] == pytest.approx(agg["en_avg"] - 0.25, abs=1e-6)
+    assert agg["ko_above_chance"] == pytest.approx(agg["ko_avg"] - 0.50, abs=1e-6)
+    assert agg["en_n_tasks"] == 1 and agg["ko_n_tasks"] == 1
 
 
 def test_build_downstream_tasks_filters_during_training(tmp_path):
