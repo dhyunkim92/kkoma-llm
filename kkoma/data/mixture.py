@@ -10,13 +10,14 @@ using a deterministic, seed-based scheme.
   would otherwise contribute more tokens per draw, so the sampler divides each
   weight by that source's running mean document length.
 - ``"document"`` — the ratio applies to documents, the literal draw
-  probability. This is what the shipped 1.3B runs used; keep it to reproduce
-  them.
+  probability. Use it when the sources should contribute equally *often*
+  regardless of how long their documents are.
 
-The difference is not cosmetic. Under ``"document"`` the 2026-07 CPT run's
-70/30 target was realized as 64/36 in tokens, and the English source drained at
-84% of the budget, leaving the last 1,218 steps Korean-only (see
-docs/audit-2026-07.md §A-3).
+Pick deliberately: the two are far apart when document lengths differ. Under
+``"document"`` the 2026-07 CPT run's 70/30 target was realized as 64/36 in
+tokens, and the English source drained at 84% of the budget, leaving the last
+1,218 steps Korean-only (docs/audit-2026-07.md §A-3). Language-mixture targets
+are token targets, so ``"token"`` is the default.
 """
 
 from __future__ import annotations

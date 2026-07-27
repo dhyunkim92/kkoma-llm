@@ -107,11 +107,12 @@ def _realized_ratio(stream, take):
 
 
 def test_document_weighting_misses_the_token_target(tmp_path):
-    """The pre-2026-07 behaviour, kept for reproducing the shipped runs.
+    """Document weighting is a draw-frequency ratio, not a token ratio.
 
     Equal per-document weights over sources with 1:4 document lengths give a 1:4
     token split, not 1:1 — which is how the 1.3B CPT run's 70/30 target was
-    realized as 64/36 (docs/audit-2026-07.md §A-3).
+    realized as 64/36 (docs/audit-2026-07.md §A-3). Pinned so the distinction
+    stays visible rather than surprising the next person who sets a mixture.
     """
 
     srcs = [_uniform_length_source(tmp_path, "short", 100, 4000),

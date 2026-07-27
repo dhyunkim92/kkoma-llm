@@ -125,9 +125,9 @@ class DataConfig:
     sampling_seed: int = 42
     min_doc_chars: int = 16
     # What the source weights are a ratio of. "token" (default) makes 95/5 and
-    # 70/30 mean what they say; "document" is the literal draw probability and
-    # reproduces the pre-2026-07 runs, whose 70/30 target realized as 64/36 in
-    # tokens (docs/audit-2026-07.md §A-3).
+    # 70/30 mean what they say, which is what a language-mixture target means;
+    # "document" weights by draw frequency instead. They diverge sharply when
+    # document lengths differ — see kkoma/data/mixture.py.
     mixture_weighting: str = "token"
     # Validation holdout produced from the same pipeline.
     val_sources: list[DataSource] = field(default_factory=list)
