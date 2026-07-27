@@ -566,11 +566,21 @@ python scripts/evaluate.py \
 
 > **정밀도:** `evaluate.py`와 `sample.py`는 모델을 순수 **FP32**로 돌립니다 — autocast도, 가중치
 > 변환도 없고 `training.precision`을 참조하지 않습니다(체크포인트에 FP32 master weights가 저장되므로
-> FP32로 로드됩니다). 학습과 *학습 중* 평가는 FP16 autocast로 돌기 때문에(§10), 같은 벤치마크라도
-> W&B의 마지막 점과 여기 최종 수치가 미세하게 다를 수 있습니다. 둘 중 FP32 쪽이 더 정확하며, 대신
-> 가중치 메모리를 FP16 대비 약 2배 씁니다. 체크포인트는 `map_location="cpu"`로 읽어, 평가에서 쓰지
+> FP32로 로드됩니다). 학습과 학습 중 평가는 FP16 autocast를 씁니다(§10). 다만 실제로는 잃는 것도
+> 얻는 것도 측정되지 않습니다 — 1.3B에서 **동일한 배치**에 대해 FP16 autocast와 FP32의 validation
+> loss가 **소수점 4자리까지 일치**했습니다. 체크포인트는 `map_location="cpu"`로 읽어, 평가에서 쓰지
 > 않는 옵티마이저 상태(가중치의 약 2배)가 GPU에 올라가지 않게 합니다 — 1.3B의 V100 실측 피크는
 > CUDA로 직접 로드할 때의 17.1GB가 아니라 **4.8GB**입니다.
+
+> **`language_modeling` 수치는 작은 표본입니다 — 학습 곡선과 직접 비교하지 마세요.**
+> `--max-batches` 기본값이 50이라 단일 프로세스에서 `50 × micro_batch_size × context_length` 토큰
+> (1.3B 기준 약 102K)만 봅니다. 반면 학습 중 `val/loss`는 `training.eval_tokens`(기본 10M)를 모든
+> rank에 걸쳐 소비하므로 **약 100배 많은 데이터**를 읽습니다. 계산 방식은 동일하지만(검증됨: 같은
+> 배치면 소수점 4자리까지 같은 loss) 읽는 구간이 다르고, `evaluate.py`는 stride 없이 **앞부분 연속
+> 구간**만 읽습니다. 그 앞부분은 대표성이 없습니다 — 1.3B 실측에서 서로 겹치지 않는 50배치 창 8개가
+> EN 2.48~2.72, KO 2.65~2.93로 흩어졌고 **두 언어 모두 첫 창이 가장 어려웠습니다**. 그래서 기본
+> 50배치 값은 약 +0.15 높게 나옵니다. 400배치로 넓히면 2.58 / 2.78로, 학습 실행의 2.556 / 2.754에
+> 근접합니다. 곡선과 비교 가능한 수치가 필요하면 `--max-batches`를 올리세요.
 
 ### 7.2 Downstream 벤치마크
 
@@ -585,8 +595,9 @@ python scripts/evaluate.py \
 학습 중에는 3개(HellaSwag, ARC-Easy, KoBEST-HellaSwag)만 돌려 루프를 가볍게 유지하고, 최종 실행이
 전부를 채점합니다. `evaluate.py` 출력은 `downstream.tasks[이름]`(`acc_norm`, `margin_max`,
 `margin_mean`, `n`)과 `downstream.aggregates`(`en_avg` / `ko_avg` / `overall_avg`)를 기록합니다.
-두 곳은 정밀도도 다릅니다 — 학습 중은 FP16 autocast, 최종은 FP32(§7.1의 note 참고) — 따라서 학습
-곡선의 마지막 점이 아니라 **최종 수치를 결과로** 삼으세요.
+두 곳 모두 *동일한* 고정 문항을 채점하므로 직접 비교할 수 있습니다. 차이는 정밀도뿐이고(학습 중
+FP16 autocast, 최종 FP32) 그 영향은 측정상 무의미했습니다(§7.1). 최종 실행이 3개가 아닌 12개 전부를
+채점하므로 **최종 수치를 결과로** 삼으세요.
 
 `margin_max` / `margin_mean`(정답에서 가장 강한 / 평균 오답을 뺀 값)은 정답이 뒤집히기 전에 먼저
 움직이므로, 약 500문항이라 변동이 큰(표준오차 ~2%) chance 근처에서 유용합니다. 이 규모(tpp ~10)에서

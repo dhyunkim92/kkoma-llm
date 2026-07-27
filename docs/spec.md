@@ -981,9 +981,17 @@ unscale하여 임계값이 실제 gradient 단위로 적용되도록 한다. RMS
 
 학습 후 평가(`scripts/evaluate.py`)와 추론(`scripts/sample.py`)은 autocast 없이 **FP32**로 실행한다.
 `training.precision`을 참조하지 않으며, 체크포인트가 FP32 master weights를 저장하므로 FP32로 로드된다.
-학습 루프 내부의 validation loss 및 downstream 채점은 학습과 동일하게 FP16 autocast로 수행하므로,
-동일 벤치마크라도 학습 중 기록과 최종 평가 수치가 미세하게 다를 수 있다. 최종 평가 수치를 결과로
-삼는다.
+학습 루프 내부의 validation loss 및 downstream 채점은 학습과 동일하게 FP16 autocast로 수행한다.
+
+정밀도 차이 자체의 영향은 무시할 수준이다. 1.3B에서 동일한 배치에 대해 FP16 autocast와 FP32의
+validation loss는 소수점 4자리까지 일치했다.
+
+학습 중 `val/loss`와 학습 후 `language_modeling` 수치가 다르다면 원인은 정밀도가 아니라 **평가 구간**
+이다. 학습 중 평가는 `training.eval_tokens`(기본 10,000,000)를 전 rank에 걸쳐 소비하는 반면,
+`evaluate.py`는 단일 프로세스에서 `--max-batches`(기본 50)만큼만, 그것도 stride 없이 스트림 앞부분
+연속 구간을 읽는다. 이 앞부분은 대표성이 없다 — 1.3B 실측에서 겹치지 않는 50배치 창 8개가 EN
+2.48~2.72, KO 2.65~2.93으로 흩어졌고 두 언어 모두 첫 창이 가장 어려웠다. 곡선과 비교 가능한 수치가
+필요하면 `--max-batches`를 올린다.
 
 ### 17.2 안정성 검사
 

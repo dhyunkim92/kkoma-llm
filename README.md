@@ -589,12 +589,23 @@ is compared apples-to-apples): EN `"The meaning of life is"`, `"Artificial intel
 
 > **Precision:** `evaluate.py` and `sample.py` run the model in plain **FP32** — no autocast, no
 > weight cast, and `training.precision` is not consulted (checkpoints store FP32 master weights, so
-> they load as FP32). Training and its *in-training* evaluation run under FP16 autocast (§10), so
-> the same benchmark can differ slightly between the last W&B point and the final number here.
-> FP32 is the more accurate of the two; the cost is roughly 2× the weight memory versus FP16.
-> Checkpoints are read with `map_location="cpu"` so the optimizer state they carry (~2× the
-> weights, unused here) never reaches the GPU — measured peak for the 1.3B on a V100 is **4.8 GB**
-> rather than the 17.1 GB a direct CUDA load costs.
+> they load as FP32), while training and its in-training evaluation use FP16 autocast (§10). In
+> practice this costs nothing and buys nothing measurable: on the 1.3B, validation loss over the
+> same batches came out **identical to four decimals** under FP16 autocast and FP32. Checkpoints are
+> read with `map_location="cpu"` so the optimizer state they carry (~2× the weights, unused here)
+> never reaches the GPU — measured peak for the 1.3B on a V100 is **4.8 GB** rather than the 17.1 GB
+> a direct CUDA load costs.
+
+> **The `language_modeling` number is a small sample — do not compare it to the training curve.**
+> `--max-batches` defaults to 50, i.e. `50 × micro_batch_size × context_length` tokens on a single
+> process (~102K for the 1.3B). The in-training `val/loss` instead spends `training.eval_tokens`
+> (10M by default) spread across every rank — roughly 100× more data. The two are computed the same
+> way (verified: same batches ⇒ same loss to four decimals), but they read different amounts of the
+> stream, and `evaluate.py` reads a *contiguous prefix* rather than a stride through it. That prefix
+> is not representative: measured on the 1.3B, eight disjoint 50-batch windows ranged 2.48–2.72 (EN)
+> and 2.65–2.93 (KO), with the **first window the hardest in both languages**. So the default
+> 50-batch figure reads ~0.15 high; widening to 400 batches gives 2.58 / 2.78 against the training
+> run's 2.556 / 2.754. Raise `--max-batches` when you need a figure comparable to the curve.
 
 ### 7.2 Downstream benchmarks
 
@@ -610,8 +621,9 @@ distinct places:
 Keeping training to three tasks (HellaSwag, ARC-Easy, KoBEST-HellaSwag) holds the loop fast; the
 final run scores everything. The `evaluate.py` output records `downstream.tasks[name]` (`acc_norm`,
 `margin_max`, `margin_mean`, `n`) and `downstream.aggregates` (`en_avg` / `ko_avg` / `overall_avg`).
-The two places also differ in precision — FP16 autocast during training, FP32 in the final run
-(see the note in §7.1) — so treat the final number, not the last training point, as the result.
+Both score the *same* frozen questions, so the two are directly comparable; they differ only in
+precision (FP16 autocast during training, FP32 in the final run), which measured immaterial (§7.1).
+Treat the final run as the result, since it covers all twelve tasks rather than three.
 
 `margin_max` / `margin_mean` (gold minus the strongest / average distractor) move before the
 accuracy flips — useful near chance, where a ~500-question set is noisy (~2% SE). At this scale
