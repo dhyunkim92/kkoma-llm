@@ -587,6 +587,12 @@ is compared apples-to-apples): EN `"The meaning of life is"`, `"Artificial intel
 `"In the future, small language models"`; KO `"인공지능이란"`, `"대한민국의 수도는"`,
 `"작은 언어 모델을 직접 학습하면"`. To generate from your *own* prompt, use `sample.py` (§7.3).
 
+> **Precision:** `evaluate.py` and `sample.py` run the model in plain **FP32** — no autocast, no
+> weight cast, and `training.precision` is not consulted (checkpoints store FP32 master weights, so
+> they load as FP32). Training and its *in-training* evaluation run under FP16 autocast (§10), so
+> the same benchmark can differ slightly between the last W&B point and the final number here.
+> FP32 is the more accurate of the two; the cost is roughly 2× the weight memory during evaluation.
+
 ### 7.2 Downstream benchmarks
 
 The frozen multiple-choice suite (Phase 2 step 1′ builds the sets), scored by length-normalized
@@ -601,6 +607,8 @@ distinct places:
 Keeping training to three tasks (HellaSwag, ARC-Easy, KoBEST-HellaSwag) holds the loop fast; the
 final run scores everything. The `evaluate.py` output records `downstream.tasks[name]` (`acc_norm`,
 `margin_max`, `margin_mean`, `n`) and `downstream.aggregates` (`en_avg` / `ko_avg` / `overall_avg`).
+The two places also differ in precision — FP16 autocast during training, FP32 in the final run
+(see the note in §7.1) — so treat the final number, not the last training point, as the result.
 
 `margin_max` / `margin_mean` (gold minus the strongest / average distractor) move before the
 accuracy flips — useful near chance, where a ~500-question set is noisy (~2% SE). At this scale
@@ -750,9 +758,15 @@ data/downstream/
   code configures itself from the environment (`RANK`/`WORLD_SIZE`/`LOCAL_RANK`). During gradient
   accumulation, `no_sync()` avoids unnecessary all-reduces and synchronization happens only on
   the last micro-step.
-- **Mixed precision (FP16)**: autocast + GradScaler. Every log interval checks loss finiteness,
-  grad norm, scaler scale, and skipped steps; NaN/Inf steps are skipped (in lockstep across
-  ranks).
+- **Mixed precision (FP16)**: the standard AMP recipe, not pure FP16. **Weights stay FP32**
+  (master weights) and the optimizer updates them in FP32; only the forward/backward compute runs
+  in FP16 under `torch.autocast`, with a `GradScaler` to keep small gradients from underflowing.
+  Gradients are unscaled *before* clipping so the threshold applies in real gradient units, and
+  RMSNorm accumulates in FP32 regardless. Every log interval checks loss finiteness, grad norm,
+  scaler scale, and skipped steps; NaN/Inf steps are skipped (in lockstep across ranks).
+  `precision` also accepts `bf16` (GradScaler is then disabled — BF16 has FP32's exponent range,
+  so loss scaling is unnecessary) and `fp32`. On CPU, `fp16` is automatically downgraded to `fp32`
+  with a notice, since CPU autocast-FP16 is unsupported.
 - **Checkpoints**: save the model, optimizer, scheduler, scaler, global step, tokens processed,
   RNG state, config, and provenance identifiers. Weight tying is restored to the same Parameter
   object after loading. Only the last N periodic checkpoints are kept, with best kept separately.

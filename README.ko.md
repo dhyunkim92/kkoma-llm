@@ -564,6 +564,12 @@ python scripts/evaluate.py \
 `"In the future, small language models"`; 한국어 `"인공지능이란"`, `"대한민국의 수도는"`,
 `"작은 언어 모델을 직접 학습하면"`. **직접 준** 프롬프트로 생성하려면 `sample.py`(§7.3)를 쓰세요.
 
+> **정밀도:** `evaluate.py`와 `sample.py`는 모델을 순수 **FP32**로 돌립니다 — autocast도, 가중치
+> 변환도 없고 `training.precision`을 참조하지 않습니다(체크포인트에 FP32 master weights가 저장되므로
+> FP32로 로드됩니다). 학습과 *학습 중* 평가는 FP16 autocast로 돌기 때문에(§10), 같은 벤치마크라도
+> W&B의 마지막 점과 여기 최종 수치가 미세하게 다를 수 있습니다. 둘 중 FP32 쪽이 더 정확하며, 대신
+> 평가 시 가중치 메모리를 약 2배 씁니다.
+
 ### 7.2 Downstream 벤치마크
 
 고정 다지선다 스위트(Phase 2 단계 1′에서 세트 생성)이며, 길이 정규화 continuation log-likelihood
@@ -577,6 +583,8 @@ python scripts/evaluate.py \
 학습 중에는 3개(HellaSwag, ARC-Easy, KoBEST-HellaSwag)만 돌려 루프를 가볍게 유지하고, 최종 실행이
 전부를 채점합니다. `evaluate.py` 출력은 `downstream.tasks[이름]`(`acc_norm`, `margin_max`,
 `margin_mean`, `n`)과 `downstream.aggregates`(`en_avg` / `ko_avg` / `overall_avg`)를 기록합니다.
+두 곳은 정밀도도 다릅니다 — 학습 중은 FP16 autocast, 최종은 FP32(§7.1의 note 참고) — 따라서 학습
+곡선의 마지막 점이 아니라 **최종 수치를 결과로** 삼으세요.
 
 `margin_max` / `margin_mean`(정답에서 가장 강한 / 평균 오답을 뺀 값)은 정답이 뒤집히기 전에 먼저
 움직이므로, 약 500문항이라 변동이 큰(표준오차 ~2%) chance 근처에서 유용합니다. 이 규모(tpp ~10)에서
@@ -720,8 +728,14 @@ data/downstream/
 - **DDP**: GPU당 한 프로세스, NCCL 백엔드. `torchrun --nproc_per_node=N`으로 실행하면 코드가
   환경변수(`RANK`/`WORLD_SIZE`/`LOCAL_RANK`)를 읽어 자동 구성합니다. gradient accumulation 중에는
   `no_sync()`로 불필요한 all-reduce를 피하고 마지막 micro-step에서만 동기화합니다.
-- **혼합정밀(FP16)**: autocast + GradScaler. 매 로그 주기에 loss finite 여부·grad norm·scaler scale·
-  skipped step을 점검하고, NaN/Inf면 스텝을 건너뜁니다.
+- **혼합정밀(FP16)**: 순수 FP16이 아니라 표준 AMP 레시피입니다. **가중치는 FP32로 유지**되고
+  (master weights) 옵티마이저도 FP32에서 갱신합니다. `torch.autocast` 아래에서 forward/backward
+  연산만 FP16으로 돌고, 작은 gradient가 언더플로하지 않도록 `GradScaler`를 씁니다. clipping 전에
+  gradient를 unscale하므로 임계값이 실제 gradient 단위로 적용되고, RMSNorm은 항상 FP32로
+  누산합니다. 매 로그 주기에 loss finite 여부·grad norm·scaler scale·skipped step을 점검하고,
+  NaN/Inf면 스텝을 건너뜁니다. `precision`은 `bf16`(이때 GradScaler는 비활성 — BF16은 FP32와 지수
+  범위가 같아 loss scaling이 불필요)과 `fp32`도 받습니다. CPU에서는 autocast-FP16이 지원되지 않아
+  `fp16`이 안내와 함께 `fp32`로 자동 강등됩니다.
 - **체크포인트**: 모델·옵티마이저·스케줄러·scaler·global step·처리 토큰·RNG·config·식별자를 저장.
   weight tying은 로드 후에도 동일 Parameter 객체로 복원됩니다. 최신 N개만 유지 + best 별도 보관.
 - **재현성**: global/data/init/sampling 시드를 분리 관리하고 config와 함께 저장. 데이터 manifest·

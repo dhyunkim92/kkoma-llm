@@ -961,9 +961,29 @@ sampling seed
 ### 17.1 FP16
 
 ```text
-Autocast: enabled
-Gradient scaler: enabled
+Master weights:   FP32
+Compute (fwd/bwd): FP16 (autocast)
+Optimizer update:  FP32
+Autocast:          enabled
+Gradient scaler:   enabled
 ```
+
+순수 FP16이 아니라 표준 AMP 구성이다. 가중치는 FP32(master weights)로 유지하고 옵티마이저도 FP32에서
+갱신하며, autocast 아래의 forward/backward 연산만 FP16으로 수행한다. gradient는 clipping 전에
+unscale하여 임계값이 실제 gradient 단위로 적용되도록 한다. RMSNorm은 dtype과 무관하게 FP32로
+누산한 뒤 원래 dtype으로 되돌린다(8.2 참조).
+
+`precision`은 `fp16` 외에 `bf16`, `fp32`를 허용한다. `bf16`에서는 gradient scaler를 비활성화한다
+(BF16은 FP32와 지수 범위가 같아 loss scaling이 불필요하다). CPU에서는 autocast-FP16이 지원되지 않아
+`fp16`을 `fp32`로 자동 강등한다.
+
+### 17.1.1 평가 및 추론 정밀도
+
+학습 후 평가(`scripts/evaluate.py`)와 추론(`scripts/sample.py`)은 autocast 없이 **FP32**로 실행한다.
+`training.precision`을 참조하지 않으며, 체크포인트가 FP32 master weights를 저장하므로 FP32로 로드된다.
+학습 루프 내부의 validation loss 및 downstream 채점은 학습과 동일하게 FP16 autocast로 수행하므로,
+동일 벤치마크라도 학습 중 기록과 최종 평가 수치가 미세하게 다를 수 있다. 최종 평가 수치를 결과로
+삼는다.
 
 ### 17.2 안정성 검사
 
